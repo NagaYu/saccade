@@ -1,5 +1,10 @@
 # Saccade 👁️⚡
 
+[![ci](https://github.com/NagaYu/saccade/actions/workflows/ci.yml/badge.svg)](https://github.com/NagaYu/saccade/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![release](https://img.shields.io/github/v/release/NagaYu/saccade)](https://github.com/NagaYu/saccade/releases)
+
 **予測誤差ゲート＋エネルギー予算制御による、常時オンのエッジVLM.**
 *Predict what the next frame will look like; spend compute only where you were wrong; never exceed your energy budget.*
 
