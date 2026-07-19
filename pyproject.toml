@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saccade-vlm"
+version = "0.1.0"
+description = "Predictive-error gating + energy-budget control for an always-on edge VLM (research prototype)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "NagaYu" }]
+keywords = ["edge-ai", "vlm", "vision-transformer", "energy-efficiency", "video-streaming"]
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.1",
+    "opencv-python>=4.8",
+    "matplotlib>=3.7",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+hf = ["transformers>=4.40", "accelerate>=0.30"]
+dev = ["pytest>=7.4"]
+
+[project.urls]
+Repository = "https://github.com/NagaYu/saccade"
+
+[tool.setuptools]
+packages = ["saccade"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

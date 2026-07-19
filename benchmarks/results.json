@@ -1,0 +1,109 @@
+{
+  "config": {
+    "source": "synthetic",
+    "backbone": "synthetic",
+    "budget": 0.02,
+    "fps": 10.0,
+    "tau": 0.06,
+    "img_size": 224,
+    "frames": 150,
+    "warmup": 6,
+    "no_gif": false
+  },
+  "conditions": {
+    "Full": {
+      "label": "Full",
+      "frames": 138,
+      "GFLOPs": 1263.981,
+      "Joules": 1.264,
+      "encoded_%": 100.0,
+      "fidelity": 1.0,
+      "mean_W": 0.09159,
+      "hrs@10kJ": 30.3,
+      "budget_viol": 0
+    },
+    "TemporalSim": {
+      "label": "TemporalSim",
+      "frames": 138,
+      "GFLOPs": 430.178,
+      "Joules": 0.4302,
+      "encoded_%": 33.9,
+      "fidelity": 0.9723,
+      "mean_W": 0.03117,
+      "hrs@10kJ": 89.1,
+      "budget_viol": 0
+    },
+    "Saccade": {
+      "label": "Saccade",
+      "frames": 138,
+      "GFLOPs": 261.84,
+      "Joules": 0.2618,
+      "encoded_%": 20.6,
+      "fidelity": 0.9712,
+      "mean_W": 0.01897,
+      "hrs@10kJ": 146.4,
+      "budget_viol": 0
+    }
+  },
+  "saccade_budget_sweep": [
+    {
+      "label": "saccade@0.005",
+      "frames": 138,
+      "GFLOPs": 64.287,
+      "Joules": 0.0643,
+      "encoded_%": 5.0,
+      "fidelity": 0.9213,
+      "mean_W": 0.00466,
+      "hrs@10kJ": 596.3,
+      "budget_viol": 0
+    },
+    {
+      "label": "saccade@0.01",
+      "frames": 138,
+      "GFLOPs": 129.391,
+      "Joules": 0.1294,
+      "encoded_%": 10.1,
+      "fidelity": 0.9388,
+      "mean_W": 0.00938,
+      "hrs@10kJ": 296.3,
+      "budget_viol": 0
+    },
+    {
+      "label": "saccade@0.02",
+      "frames": 138,
+      "GFLOPs": 261.84,
+      "Joules": 0.2618,
+      "encoded_%": 20.6,
+      "fidelity": 0.9712,
+      "mean_W": 0.01897,
+      "hrs@10kJ": 146.4,
+      "budget_viol": 0
+    },
+    {
+      "label": "saccade@0.05",
+      "frames": 138,
+      "GFLOPs": 648.08,
+      "Joules": 0.6481,
+      "encoded_%": 51.2,
+      "fidelity": 0.9869,
+      "mean_W": 0.04696,
+      "hrs@10kJ": 59.1,
+      "budget_viol": 0
+    },
+    {
+      "label": "saccade@0.1",
+      "frames": 138,
+      "GFLOPs": 1188.796,
+      "Joules": 1.1888,
+      "encoded_%": 94.0,
+      "fidelity": 0.9996,
+      "mean_W": 0.08614,
+      "hrs@10kJ": 32.2,
+      "budget_viol": 0
+    }
+  ],
+  "why_temporalsim_fails": {
+    "walk_frame_same_pos_encode_pct": 35.714285714285715,
+    "walk_frame_motion_comp_encode_pct": 0.0
+  }
+}

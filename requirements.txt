@@ -1,0 +1,13 @@
+# --- core (CPU-first, required to run the benchmark + tests) ---
+numpy>=1.24
+torch>=2.1
+opencv-python>=4.8
+matplotlib>=3.7
+Pillow>=10.0
+
+# --- dev ---
+pytest>=7.4
+
+# --- optional: real ViT/DINOv2 patch-token backbone (`--backbone hf:...`) ---
+# transformers>=4.40
+# accelerate>=0.30

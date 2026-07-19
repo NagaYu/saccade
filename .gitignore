@@ -1,0 +1,20 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# editors
+.idea/
+.vscode/
+
+# local experiment junk (committed outputs live in figures/ and benchmarks/results.json)
+scratch/
+*.log
