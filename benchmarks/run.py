@@ -163,10 +163,12 @@ def fig_why_temporalsim_fails(frames, labels, img_size, path):
     axs[0, 0].imshow(frames[t - 1]); axs[0, 0].set_title("frame t-1"); axs[0, 0].axis("off")
     axs[0, 1].imshow(frames[t]); axs[0, 1].set_title("frame t (camera has panned)"); axs[0, 1].axis("off")
     im2 = axs[1, 0].imshow(res_same, cmap="inferno", vmin=0, vmax=vmax)
-    axs[1, 0].set_title(f"TemporalSim signal: SAME-position residual\n→ re-encode {b_enc:.0f}% of patches")
+    axs[1, 0].set_title(f"TemporalSim: same-position residual\n→ re-encode {b_enc:.0f}% of patches",
+                        fontsize=11)
     axs[1, 0].axis("off")
     axs[1, 1].imshow(res_mc, cmap="inferno", vmin=0, vmax=vmax)
-    axs[1, 1].set_title(f"Saccade signal: MOTION-COMPENSATED residual\n→ re-encode {c_enc:.0f}% of patches")
+    axs[1, 1].set_title(f"Saccade: motion-compensated residual\n→ re-encode {c_enc:.0f}% of patches",
+                        fontsize=11)
     axs[1, 1].axis("off")
     fig.colorbar(im2, ax=axs[1, :], fraction=0.046, pad=0.04, label="per-patch residual")
     fig.suptitle("Why temporal-similarity can't skip steady ego-motion", fontsize=13)
