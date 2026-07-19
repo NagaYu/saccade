@@ -30,25 +30,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager  # noqa: E402
-
-
-def _setup_cjk_font():
-    """Register a CJK-capable font so Japanese figure titles render (not tofu boxes)."""
-    for p in ["/Library/Fonts/Arial Unicode.ttf",
-              "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-              "/System/Library/Fonts/Hiragino Sans GB.ttc",
-              "/System/Library/Fonts/AppleSDGothicNeo.ttc"]:
-        if os.path.exists(p):
-            try:
-                font_manager.fontManager.addfont(p)
-                name = font_manager.FontProperties(fname=p).get_name()
-                plt.rcParams["font.family"] = [name, "DejaVu Sans"]
-                plt.rcParams["axes.unicode_minus"] = False
-                return name
-            except Exception:
-                continue
-    return None
 
 from saccade import (EngineConfig, SaccadeEngine, SyntheticBackbone, make_backbone,  # noqa: E402
                      summarize, synthetic_walking_stream, frames_from_video,
@@ -188,8 +169,7 @@ def fig_why_temporalsim_fails(frames, labels, img_size, path):
     axs[1, 1].set_title(f"Saccade signal: MOTION-COMPENSATED residual\n→ re-encode {c_enc:.0f}% of patches")
     axs[1, 1].axis("off")
     fig.colorbar(im2, ax=axs[1, :], fraction=0.046, pad=0.04, label="per-patch residual")
-    fig.suptitle("なぜ temporal-similarity は定常運動を間引けないか  /  Why temporal-similarity can't skip steady motion",
-                 fontsize=13)
+    fig.suptitle("Why temporal-similarity can't skip steady ego-motion", fontsize=13)
     fig.savefig(path, dpi=130, bbox_inches="tight"); plt.close(fig)
     return b_enc, c_enc
 
@@ -255,8 +235,6 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(FIGDIR, exist_ok=True)
-    font = _setup_cjk_font()
-    print(f"[font] CJK font: {font or 'not found (Japanese titles may not render)'}")
     print(f"[stream] source={args.source}")
     frames, labels = build_stream(args.source, args.img_size, args.frames)
     print(f"[stream] {len(frames)} frames")

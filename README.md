@@ -5,196 +5,192 @@
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![release](https://img.shields.io/github/v/release/NagaYu/saccade)](https://github.com/NagaYu/saccade/releases)
 
-**予測誤差ゲート＋エネルギー予算制御による、常時オンのエッジVLM.**
+**An always-on edge VLM driven by prediction-error gating and an energy budget.**
 *Predict what the next frame will look like; spend compute only where you were wrong; never exceed your energy budget.*
 
-Saccade は、頭が動いても世界の見えは滑らかに予測できる — という生物の視覚（サッカード間の予測）にならい、
-**「予測できたパッチは再エンコードしない」** ことでエッジ常時稼働VLMの消費電力を削ります。
-鍵は *自己運動 (ego-motion) の補償*：カメラが動くと画素はほぼ全て変化するが、**動きを差し引けば静止世界の残差はほぼゼロ**。
-既存の「フレーム類似度で間引く」手法が定常運動を全く間引けないのに対し、Saccade は大きく間引けます。
+Saccade borrows a trick from biological vision — the world stays smoothly predictable while your head moves — and cuts the power draw of an always-on edge VLM by **never re-encoding a patch it could predict**. The key is *ego-motion compensation*: when the camera moves, almost every pixel changes, but **subtract the motion and the residual of a static world is nearly zero**. Existing "frame-similarity" skipping cannot skip steady motion at all; Saccade skips most of it.
 
 ---
 
-## TL;DR（合成歩行ストリーム, CPU, ViT-S/16 相当）
+## TL;DR (synthetic walking stream, CPU, ViT-S/16-class encoder)
 
-| 手法 | 再エンコード% | 品質 (fidelity vs Full) | 推定エネルギー(J) | 平均電力 | **10kJでの連続稼働** |
+| Method | Patches re-encoded | Fidelity vs Full | Estimated energy (J) | Mean power | **Runtime on 10 kJ** |
 |---|---|---|---|---|---|
-| **(A) Full**（毎フレーム全エンコード） | 100.0 | 1.000 | 1.264 | 91.6 mW | 30.3 h |
-| **(B) TemporalSim**（同位置フレーム差分で間引く） | 33.9 | 0.972 | 0.430 | 31.2 mW | 89.1 h |
-| **(C) Saccade**（予測誤差ゲート＋IMU補償＋予算制御） | **20.6** | **0.971** | **0.262** | **19.0 mW** | **146.4 h** |
+| **(A) Full** (encode everything, every frame) | 100.0% | 1.000 | 1.264 | 91.6 mW | 30.3 h |
+| **(B) TemporalSim** (same-position frame-diff skipping) | 33.9% | 0.972 | 0.430 | 31.2 mW | 89.1 h |
+| **(C) Saccade** (prediction-error gate + IMU compensation + budget control) | **20.6%** | **0.971** | **0.262** | **19.0 mW** | **146.4 h** |
 
-- **省エネ**: Full 比 **4.8×**、TemporalSim 比 **1.65×** 少ない計算で、
-- **品質保持**: 品質は TemporalSim と同等（Full に対する fidelity 0.971 ≈ 0.972）、
-- **予算保証**: 予算制御ON時の予算超過は **0 件**（0.05 W〜0.0001 W の全設定で厳密不変条件を満たす）。
+- **Energy saving**: 4.8× less compute than Full and 1.65× less than TemporalSim,
+- **Quality preservation**: quality on par with TemporalSim (fidelity vs Full: 0.971 ≈ 0.972),
+- **Budget guarantee**: zero budget violations with the controller on (the strict invariant holds for every budget from 0.05 W down to 0.0001 W).
 
-> 数値は `benchmarks/results.json` に保存。エネルギーは解析的FLOPモデル×`1 pJ/FLOP`（効率的なモバイル推論の目安、`--j-per-flop` で変更可）。
+> Numbers are stored in `benchmarks/results.json`. Energy comes from an analytic FLOP model × `1 pJ/FLOP` (a reasonable figure for efficient mobile inference; change it with `--j-per-flop`).
 
 ---
 
-## 目玉の図：なぜ temporal-similarity は定常運動を間引けないか
+## The centerpiece figure: why temporal similarity can't skip steady motion
 
 ![why temporal-similarity fails](figures/why_temporalsim_fails.png)
 
-歩行区間の連続2フレーム。カメラがパンしただけで**世界は静止**しているのに、
-- **左下 (B の判定信号)**：*同位置*の残差はほぼ全面で高い → **36% を再エンコード**。
-- **右下 (C の判定信号)**：*自己運動補償後*の残差はほぼゼロ → **0% を再エンコード**。
+Two consecutive frames from the walking segment. The camera has merely panned — **the world is static** — yet:
+- **Bottom-left (B's decision signal)**: the *same-position* residual is high almost everywhere → **re-encode 36% of patches**.
+- **Bottom-right (C's decision signal)**: the *motion-compensated* residual is near zero → **re-encode 0% of patches**.
 
-これが Saccade の核心です。「変わったか？」ではなく「**動きで説明できない変化があったか？**」を問う。
+This is the heart of Saccade: don't ask "did the pixels change?" — ask "**did anything change that motion cannot explain?**"
 
-### フレーム毎の負荷（目玉）
+### Per-frame encoder workload
 ![encoded fraction over time](figures/encoded_fraction.png)
 
-`walk`/`turn`（予測可能な自己運動）区間で **B は 42–64% を再エンコードし続ける** のに対し、**C は ~14% に間引ける**。
-`static`（静止）と `event`（独立に動く物体＝真の変化）区間では両者ほぼ同じ — つまり C は**真の変化はきちんと拾う**（ずるをしていない）。
+During `walk`/`turn` (predictable ego-motion) segments, **B is stuck re-encoding 42–64%** while **C thins the load to ~14%**. On `static` (no motion) and `event` (an independently moving object = genuine change) segments the two behave almost identically — i.e. C **still catches real change** (no cheating).
 
-### 品質 / エネルギーのトレードオフ
+### Quality / energy trade-off
 ![quality vs energy](figures/quality_energy.png)
 
-Saccade は予算Bを変えるだけで Pareto 前線を掃引でき、TemporalSim の単一動作点を**支配**します（同品質でより低エネルギー、または同エネルギーでより高品質）。
+Just by varying the budget B, Saccade sweeps a Pareto frontier that **dominates** TemporalSim's single operating point (same quality at lower energy, or higher quality at the same energy).
 
-### webcam風デモ（B vs C, 赤=そのフレームで再エンコードしたパッチ）
+### Webcam-style demo (B vs C; red = patches re-encoded this frame)
 ![demo](figures/saccade_demo.gif)
 
 ---
 
-## アーキテクチャ
+## Architecture
 
 ```mermaid
 flowchart TB
   F["frame<br/>(webcam / mp4 / synthetic)"] --> G[grayscale]
-  G --> OF["optical flow<br/><b>疑似IMU</b> (motion.py)"]
-  CACHE[("PatchEmbeddingCache<br/>前フレームのトークン")]
+  G --> OF["optical flow<br/><b>pseudo-IMU</b> (motion.py)"]
+  CACHE[("PatchEmbeddingCache<br/>previous-frame tokens")]
 
-  OF -- "per-patch 変位" --> KV["<b>kv_remap.py</b><br/>自己運動でキャッシュを空間リマップ"]
+  OF -- "per-patch displacement" --> KV["<b>kv_remap.py</b><br/>remap cached tokens along ego-motion"]
   CACHE --> KV
-  KV -- "warped cache" --> PRED["<b>predictor.py</b><br/>GRUが次フレーム埋め込みを予測"]
-  OF -- "ego-motion 特徴" --> PRED
+  KV -- "warped cache" --> PRED["<b>predictor.py</b><br/>GRU predicts next-frame embeddings"]
+  OF -- "ego-motion features" --> PRED
 
-  OF -- "動き補償残差(安価)" --> GATE["<b>gate.py</b><br/>surprisal ゲート τ + task-aware"]
-  IMP["importance<br/>attention×error"] --> GATE
-  GATE -- "encode 候補集合" --> CAP{"<b>energy_controller.py</b><br/>予算でencode数を上限"}
-  BUD["token-bucket 予算<br/>B [J/s]"] --> CAP
+  OF -- "motion-compensated residual (cheap)" --> GATE["<b>gate.py</b><br/>surprisal gate τ + task-aware"]
+  IMP["importance<br/>attention × error"] --> GATE
+  GATE -- "candidate encode set" --> CAP{"<b>energy_controller.py</b><br/>budget caps the encode count"}
+  BUD["token-bucket budget<br/>B [J/s]"] --> CAP
 
-  CAP -- "surprising patches のみ" --> ENC["ViT patch encoder<br/>(backbone.py)"]
+  CAP -- "surprising patches only" --> ENC["ViT patch encoder<br/>(backbone.py)"]
   ENC -- "fresh tokens" --> MIX["splice:<br/>fresh + predicted"]
   PRED -- "predicted tokens" --> MIX
   MIX --> OUT["reconstructed<br/>patch-token map → LLM"]
-  MIX -- "observed patches で自己教師学習" --> PRED
+  MIX -- "self-supervised update on observed patches" --> PRED
   MIX --> CACHE
-  ENC -. "encodeしたFLOPs" .-> BUD
+  ENC -. "FLOPs actually spent" .-> BUD
 
   classDef core fill:#e8f0fe,stroke:#2166ac,stroke-width:2px;
   class KV,PRED,GATE,CAP core;
 ```
 
-*4つのコア（青）*：`predictor`（前方予測）・`gate`（surprisal ゲート）・`kv_remap`（動き補償再利用）・`energy_controller`（予算制御）。
-`engine.py` がこれらを毎フレーム統合し、`full` / `temporalsim` / `saccade` の3条件を**同一エンジン**で生成します（公平比較のため差分は機構のみ）。
+*The four cores (blue)*: `predictor` (forward prediction), `gate` (surprisal gating), `kv_remap` (motion-compensated reuse), `energy_controller` (budget control).
+`engine.py` integrates them every frame and produces all three conditions — `full` / `temporalsim` / `saccade` — from **one engine**, so the comparison differs only in the mechanism under test.
 
 ---
 
-## 主張 → コードの対応（各関数 docstring に「どの主張を実証するか」を明記）
+## Claims → code (every function's docstring states which claim it demonstrates)
 
-| 主張 | 実証する場所 |
+Docstrings tag claims with their Japanese research labels: 省エネ = energy saving, 品質保持 = quality preservation, 予算保証 = budget guarantee.
+
+| Claim | Where it is demonstrated |
 |---|---|
-| **省エネ** (energy saving) | `gate.py`（surprising な少数だけ encode）, `kv_remap.py`（動き補償で再計算削減）, `flops.py`（FLOP→J は encode 数に単調） |
-| **品質保持** (quality preservation) | `predictor.py`（未encodeパッチの値を予測）, `engine.py` の fidelity（再構成 vs Full のコサイン類似）, gate の task-aware/forced |
-| **予算保証** (budget guarantee) | `energy_controller.py`（token bucket で `cum_J ≤ B·t + E0` を構成的に保証, 枯渇時は frame-drop で anytime 劣化出力） |
+| **Energy saving** | `gate.py` (encode only the surprising few), `kv_remap.py` (motion compensation cuts recomputation), `flops.py` (FLOP→J is monotone in encode count) |
+| **Quality preservation** | `predictor.py` (predicts values for un-encoded patches), fidelity in `engine.py` (cosine of reconstruction vs Full), the gate's task-aware/forced paths |
+| **Budget guarantee** | `energy_controller.py` (token bucket enforces `cum_J ≤ B·t + E0` by construction; on starvation, frame-drop yields an anytime degraded output) |
 
 ---
 
-## 4つのコア（詳細）
+## The four cores in detail
 
-1. **PatchEmbeddingCache ＋ 前方予測器** — `predictor.py`, `engine.py`
-   各パッチ埋め込みをキャッシュ。極小GRU（重み全パッチ共有）が
-   *動き補償済みキャッシュ ＋ 疑似IMU* から次フレーム各パッチ埋め込みを予測。
-   **完全自己教師あり**：実際に encode した（＝gateが通した）パッチの真値で `||pred−true||` をオンライン学習。ラベル不要。
-   予測は「warpedキャッシュ上の残差」を出すので、初期は恒等（残差0）から学習が進む。
+1. **PatchEmbeddingCache + forward predictor** — `predictor.py`, `engine.py`
+   Every patch embedding is cached. A tiny GRU (weights shared across patches) predicts each patch's next-frame embedding from the *motion-compensated cache + pseudo-IMU*.
+   **Fully self-supervised**: it trains online on `||pred − true||` using the true embeddings of patches the gate chose to encode anyway. No labels.
+   The prediction is a *residual on top of the warped cache*, so learning starts from identity (residual 0) and only has to model what ego-motion cannot explain.
 
-2. **Surprisal ゲート** — `gate.py`
-   パッチ毎に *動き補償後の見えの残差*（画素空間の安価な proxy）を閾値 τ で判定し、超えたパッチだけ再エンコード、他はキャッシュKVを再利用。
-   *タスク認識版*：`importance = EMA(直近の埋め込みsurprisal)`（LLM注意が無いCPU設定での「注意×誤差」代替）で `τ_eff = τ/(1+λ·w)` とし、重要パッチの閾値を下げる。
-   （鶏卵問題：真の埋め込みsurprisalは encode 後にしか分からないため、判定は安価な proxy、学習・importance更新は encode 済みパッチの真値で行う — docstring 参照。）
+2. **Surprisal gate** — `gate.py`
+   Per patch, threshold the *motion-compensated appearance residual* (a cheap pixel-space proxy) at τ; re-encode only patches above it, reuse cached KV for the rest.
+   *Task-aware variant*: `importance = EMA(recent embedding surprisal)` (a stand-in for "attention × error" in this CPU setting without LLM attention) corrects the threshold as `τ_eff = τ/(1+λ·w)`, lowering the bar for important patches.
+   (Chicken-and-egg: true embedding surprisal is only known *after* encoding, so decisions use the cheap proxy while learning/importance updates use the true values of encoded patches — see the docstrings.)
 
-3. **モーション補償KV再利用** — `kv_remap.py`
-   疑似IMU変位でキャッシュ済みトークンを新しい空間位置へ双線形リマップしてから再利用（位置ずれによる無駄な再計算を回避）。フレーム端の新出領域は invalid として強制 encode。
-   **効果（実測）**：動き補償ONで総再計算パッチ数が **~3.3×** 減。
+3. **Motion-compensated KV reuse** — `kv_remap.py`
+   Bilinearly remap cached tokens to their new spatial positions along the pseudo-IMU displacement *before* reuse (avoiding wasted recomputation from positional misalignment). Newly revealed patches at the frame edge are invalid and force-encoded.
+   **Measured effect**: motion compensation cuts total recomputed patches by **~3.3×**.
 
-4. **エネルギー予算コントローラ** — `energy_controller.py`
-   簡易エネルギーモデル `J = (encoder+prefill FLOPs) × [J/FLOP]`。予算 `B [J/s]` に対し
-   **(1) ソフトループ**：比例制御で τ を調整し平均電力を B に追従（予算いっぱいまで使い切り効用最大化）。
-   **(2) ハードキャップ**：token bucket（容量 `E0 = reserve·B`, 毎フレーム `B/fps` 補充）が
-   `任意の t で 累積エネルギー ≤ B·t + E0` を**構成的に保証**。bucket が枯れたフレームは丸ごと drop し、
-   直前キャッシュを **anytime の劣化出力** として返す（必ず有効出力）。
+4. **Energy budget controller** — `energy_controller.py`
+   Simple energy model: `J = (encoder + LLM-prefill FLOPs) × [J/FLOP]`. Given a budget `B [J/s]`:
+   **(1) soft loop** — proportional control adapts τ so average power tracks B (spend the budget you have; maximize utility);
+   **(2) hard cap** — a token bucket (capacity `E0 = reserve·B`, refill `B/fps` per frame) enforces
+   `cumulative energy ≤ B·t + E0` for all t **by construction**. When the bucket runs dry the frame is dropped entirely and the previous cache is returned as an **anytime degraded output** (there is always a valid output).
 
 ---
 
-## クイックスタート
+## Quick start
 
 ```bash
 pip install -r requirements.txt
 
-# ベンチ（合成歩行ストリーム, 図とGIFとresults.jsonを生成）
+# benchmark (synthetic walking stream; writes figures, the GIF, and results.json)
 python benchmarks/run.py
 
-# 予算を変える / fpsを変える
+# change the budget / fps
 python benchmarks/run.py --budget 0.01 --fps 15
 
-# 実webcam or mp4 で
+# run on a real webcam or an mp4
 python benchmarks/run.py --source webcam
 python benchmarks/run.py --source path/to/walk.mp4
 
-# 実ViT/DINOv2 のパッチトークンで（要 transformers）
+# run on real ViT/DINOv2 patch tokens (requires transformers)
 python benchmarks/run.py --backbone hf:facebook/dinov2-small
 
-# テスト（予測ゲートON時の品質・予算超過なし・動き補償で再計算減 を検証）
+# tests (gate-on quality, zero budget violations, motion comp reduces recompute)
 pytest -q
 ```
 
-### 小型VLMのラッパー
-`saccade/backbone.py` は ViT系ビジョンエンコーダの**パッチ埋め込み**に介入する薄いラッパーを提供します：
+### The small-VLM wrapper
+`saccade/backbone.py` provides a thin wrapper that intervenes at the **patch embeddings** of a ViT-class vision encoder:
 
-- `SyntheticBackbone` — 依存なし・決定的・**部分パッチ encode が本当に可能**（frozen random ViT-S/16 相当）。テストと再現ベンチの既定。
-- `HFVisionBackbone` — 実 HuggingFace ViT/DINOv2（`facebook/dinov2-small` 等）のパッチトークンを露出。self-attentionのため部分encodeは*会計上*の近似（token-caching近似, `flops.py` 参照）。
-  **検証済み**：`facebook/dinov2-small`（grid 16×16, D=384）で全パイプラインが動作（44フレーム短尺ストリーム、実測値: [benchmarks/results_dinov2.json](benchmarks/results_dinov2.json)）。実DINOv2特徴でも予算スイープが品質/エネルギーの Pareto を掃引し、TemporalSim の動作点（0.130 J, fidelity 0.834）に対し **Saccade@0.05 W は 0.149 J で fidelity 0.900**（同エネルギー帯で +0.066）、@0.1 W は 0.303 J / 0.971（Full 0.464 J 比 35% 減で品質 97%）。予算違反は全設定で 0。
-  注意点も実測どおり記す：実特徴は self-attention で文脈が混ざるため、キャッシュ再利用の誤差が合成encoderより大きく、**低予算側の品質劣化は速い**（0.065 J → fidelity 0.719）。意味的特徴での低予算運用は今後の改善対象。
-  moondream2 / SmolVLM 等のVLMビジョンタワーも同API（パッチトークン露出）で差し替え可能な設計。
+- `SyntheticBackbone` — dependency-free, deterministic, and **genuinely capable of encoding a subset of patches** (a frozen-random ViT-S/16 stand-in). Default for tests and the reproducible benchmark.
+- `HFVisionBackbone` — exposes the patch tokens of a real HuggingFace ViT/DINOv2 (e.g. `facebook/dinov2-small`). Because of self-attention, subset encoding is an *accounting* approximation (token-caching; see `flops.py`).
+  **Verified**: the full pipeline runs end-to-end on `facebook/dinov2-small` (grid 16×16, D=384; 44-frame short stream; measurements in [benchmarks/results_dinov2.json](benchmarks/results_dinov2.json)). On real DINOv2 features the budget sweep still traces a quality/energy Pareto: against TemporalSim's operating point (0.130 J, fidelity 0.834), **Saccade@0.05 W reaches fidelity 0.900 at 0.149 J** (+0.066 in the same energy band), and @0.1 W reaches 0.971 at 0.303 J (35% less energy than Full's 0.464 J at 97% quality). Zero budget violations in every setting.
+  Honest caveat, also measured: real features mix context through self-attention, so cache-reuse error is larger than with the synthetic encoder and **low-budget quality degrades faster** (0.065 J → fidelity 0.719). Low-budget operation on semantic features is future work.
+  Vision towers of VLMs such as moondream2 / SmolVLM can be swapped in through the same API (patch-token exposure).
 
-> **なぜ既定が合成？** アルゴリズム（予測ゲート/動き補償/予算制御）はバックボーン非依存です。合成encoderは各パッチが独立関数なので**部分encodeが実計算削減として実現**し、省エネ主張が近似なしで測れます。実ViTでは同じ機構が実特徴の上で動く様子を確認できます（品質保持の確認向き）。
+> **Why is the default synthetic?** The algorithms (predictive gating / motion compensation / budget control) are backbone-agnostic. With the synthetic encoder each patch is an independent function of its pixels, so **subset encoding realizes the savings as real computation** — the energy claim is measured without approximation. The real-ViT path shows the same machinery running on genuine semantics (best for checking quality preservation).
 
 ---
 
-## リポジトリ構成
+## Repository layout
 
 ```
 saccade/
-  backbone.py          # ViTパッチ埋め込みラッパー（synthetic / HF）
-  motion.py            # 光学フロー = 疑似IMU（per-patch変位 + ego-motion特徴）
-  predictor.py         # 前方予測器（共有重みGRU, オンライン自己教師あり）
-  kv_remap.py          # 動き補償によるキャッシュ空間リマップ
-  gate.py              # surprisal ゲート（proxy判定 + task-aware + importance）
-  energy_controller.py # token-bucket 予算制御（比例τ + anytime frame-drop）
-  engine.py            # 4コアを統合する常時オンループ + full/temporalsim/saccade
-  flops.py             # 解析的FLOP/エネルギーモデル
-  stream.py            # フレーム源（合成歩行 / webcam / mp4）
+  backbone.py          # ViT patch-embedding wrapper (synthetic / HF)
+  motion.py            # optical flow = pseudo-IMU (per-patch displacement + ego-motion features)
+  predictor.py         # forward predictor (shared-weight GRU, online self-supervised)
+  kv_remap.py          # motion-compensated spatial remap of the cache
+  gate.py              # surprisal gate (proxy decision + task-aware + importance)
+  energy_controller.py # token-bucket budget control (proportional τ + anytime frame-drop)
+  engine.py            # the always-on loop integrating the four cores + full/temporalsim/saccade
+  flops.py             # analytic FLOP/energy model
+  stream.py            # frame sources (synthetic walking / webcam / mp4)
   types.py             # EngineConfig / FrameResult / RunSummary
 benchmarks/
-  run.py               # A/B/C比較・図・GIF・results.json
-  results.json         # 最新の測定値
-figures/               # 生成物（PNG + demo GIF）
-tests/                 # pytest（省エネ/品質保持/予算保証 を検証）
+  run.py               # A/B/C comparison, figures, GIF, results.json
+  results.json         # latest measurements
+figures/               # generated artifacts (PNGs + demo GIF)
+tests/                 # pytest (verifies energy saving / quality preservation / budget guarantee)
 ```
 
 ---
 
-## 設計上の正直な注記 (honest caveats)
+## Honest caveats
 
-- **エネルギーは解析モデル**：実測 J ではなく `FLOPs × [J/FLOP]` の推定。相対比較（A/B/C）と予算保証の論理は正しく、絶対値は係数依存。`--j-per-flop` で係数変更可。
-- **token-caching 近似**：実ViTでは各パッチトークンが自己注意で混ざるため、部分encodeの節約は「そのトークンだけ再計算し他はキャッシュ再利用」という近似で会計。実HWでの実現には block-sparse attention が要る（本プロトタイプは*判定品質*と*モデル化エネルギー*を測る）。合成バックボーンは節約を実計算として実現。
-- **合成ストリーム**：既定入力は決定的な合成「歩行」映像（明示的にラベル）。定常運動regimeを制御して再現可能に評価するため。実webcam/mp4も同一パイプラインで動作。
-- **サーバ側長尺QAに非依存**：V-Rex/StreamingTOM 系の長尺動画QAには依存・模倣していません。エッジ常時オン設定に集中。
-- **量子化/NPUは後回し**：まずCPU＋小型モデルで正しく動くことを最優先（本README/テストは全てCPUで再現）。
+- **Energy is an analytic model**: estimated as `FLOPs × [J/FLOP]`, not measured Joules. The relative comparison (A/B/C) and the budget-guarantee logic are sound; absolute values depend on the coefficient (`--j-per-flop`).
+- **Token-caching approximation**: in a real ViT, self-attention mixes patch tokens, so subset-encode savings are accounted as "recompute only that token, reuse cached KV for the rest". Realizing this on hardware needs block-sparse attention (this prototype measures *decision quality* and *modelled energy*). The synthetic backbone realizes the savings as real computation.
+- **Synthetic stream**: the default input is a deterministic synthetic "walking" video (explicitly labelled as such), chosen to evaluate the steady-motion regime reproducibly. Real webcam/mp4 inputs run through the identical pipeline.
+- **No reliance on server-side long-video QA**: nothing here depends on or imitates V-Rex / StreamingTOM-style long-form video QA. The focus is the always-on edge setting.
+- **Quantization/NPU deferred**: correctness on CPU with small models comes first (everything in this README and the tests reproduces on CPU).
 
 ---
 
-## ライセンス
-MIT — [LICENSE](LICENSE) 参照。研究プロトタイプです。
+## License
+MIT — see [LICENSE](LICENSE). Research prototype.
