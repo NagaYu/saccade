@@ -9,7 +9,7 @@
     "frames": 150,
     "warmup": 6,
     "j_per_flop": 1e-12,
-    "no_gif": false,
+    "no_gif": true,
     "no_figures": false,
     "out": "results.json"
   },

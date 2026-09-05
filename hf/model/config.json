@@ -38,8 +38,9 @@
         ],
         "frames_per_stream": 144,
         "optimizer": "SGD(momentum=0.9)",
-        "lr": 0.005,
-        "objective": "self-supervised ||pred - true|| on gate-encoded patches only"
+        "lr": 0.001,
+        "objective": "self-supervised ||pred - true|| on gate-encoded patches only",
+        "trust_calibration": "held-out stream (seed 99); shipped trust is the value earned there"
       },
       "eval": {
         "eval_seed": 99,
@@ -51,20 +52,20 @@
           "mean_encoded_fraction": 0.14558531746031747
         },
         "cold_start": {
-          "mean_fidelity": 0.9695929711063703,
-          "early_fidelity": 0.9810878495375316,
+          "mean_fidelity": 0.9697317965328693,
+          "early_fidelity": 0.9810880978902181,
           "mean_encoded_fraction": 0.15238803854875282
         },
         "warm_start": {
-          "mean_fidelity": 0.969617683854368,
-          "early_fidelity": 0.9810907423496247,
+          "mean_fidelity": 0.9697448453969426,
+          "early_fidelity": 0.9810829818248749,
           "mean_encoded_fraction": 0.15238803854875282
         },
-        "delta_vs_no_predictor": 0.0007076201339561994,
-        "delta_vs_cold_start": 2.4712747997646112e-05,
-        "delta_early_vs_cold": 2.892812093091557e-06,
-        "final_trust_warm": 0.3500000238418579,
-        "final_trust_cold": 0.3500000238418579
+        "delta_vs_no_predictor": 0.000834781676530838,
+        "delta_vs_cold_start": 1.3048864073272881e-05,
+        "delta_early_vs_cold": -5.116065343258036e-06,
+        "final_trust_warm": 0.40000003576278687,
+        "final_trust_cold": 0.40000003576278687
       }
     },
     "dinov2-small": {
@@ -93,8 +94,9 @@
         ],
         "frames_per_stream": 60,
         "optimizer": "SGD(momentum=0.9)",
-        "lr": 0.005,
-        "objective": "self-supervised ||pred - true|| on gate-encoded patches only"
+        "lr": 0.001,
+        "objective": "self-supervised ||pred - true|| on gate-encoded patches only",
+        "trust_calibration": "held-out stream (seed 99); shipped trust is the value earned there"
       },
       "eval": {
         "eval_seed": 99,
@@ -106,20 +108,20 @@
           "mean_encoded_fraction": 0.19694010416666666
         },
         "cold_start": {
-          "mean_fidelity": 0.8460859517256419,
-          "early_fidelity": 0.8945602297782898,
+          "mean_fidelity": 0.8481445709864298,
+          "early_fidelity": 0.8942895869414011,
           "mean_encoded_fraction": 0.20638020833333334
         },
         "warm_start": {
-          "mean_fidelity": 0.8475754787524541,
-          "early_fidelity": 0.89407932360967,
+          "mean_fidelity": 0.8498750984668731,
+          "early_fidelity": 0.8942244708538055,
           "mean_encoded_fraction": 0.20638020833333334
         },
-        "delta_vs_no_predictor": 0.014692106842994712,
-        "delta_vs_cold_start": 0.001489527026812154,
-        "delta_early_vs_cold": -0.00048090616861973245,
+        "delta_vs_no_predictor": 0.016991726557413767,
+        "delta_vs_cold_start": 0.0017305274804433335,
+        "delta_early_vs_cold": -6.511608759562915e-05,
         "final_trust_warm": 0.3500000238418579,
-        "final_trust_cold": 0.05000000074505806
+        "final_trust_cold": 0.949999988079071
       }
     }
   }

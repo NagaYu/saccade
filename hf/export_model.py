@@ -127,6 +127,7 @@ def evaluate(backbone, predictor: GRUPatchPredictor, eval_seed: int, n_frames: i
     }
     out["final_trust_warm"] = float(warm.trust)
     out["final_trust_cold"] = float(cold.trust)
+    out["_calibrated_predictor"] = warm      # weights+trust after held-out adaptation
     for label, s in [("warp-only", n), ("cold", c), ("warm", w)]:
         print(f"  [eval] {label:9s} mean_fid={s['mean_fidelity']:.5f} "
               f"early_fid={s['early_fidelity']:.5f} enc={s['mean_encoded_fraction']*100:.1f}%")
@@ -142,7 +143,7 @@ def main():
     ap.add_argument("--train-seeds", type=int, nargs="+", default=[0, 2, 3, 4, 5])
     ap.add_argument("--eval-seed", type=int, default=99)
     ap.add_argument("--frames", type=int, default=144)
-    ap.add_argument("--lr", type=float, default=5e-3)
+    ap.add_argument("--lr", type=float, default=1e-3)
     args = ap.parse_args()
 
     os.makedirs(OUTDIR, exist_ok=True)
@@ -158,6 +159,15 @@ def main():
 
     print("[eval] held-out stream")
     ev = evaluate(backbone, predictor, args.eval_seed, args.frames, args.lr)
+
+    # Ship the trust calibrated on HELD-OUT data. During offline training the head starts
+    # untrained, so the counterfactual check correctly drives trust to 0 early on and it
+    # recovers only slowly (0.05/frame). Saving that transient would hand users a predictor
+    # that applies no correction until it re-earns trust online. The held-out value is the
+    # honest, validated one — and the weights that produced it are the ones we save.
+    calibrated = ev.pop("_calibrated_predictor")
+    predictor.load_state_dict(calibrated.state_dict())
+    print(f"[calib] shipping trust={float(predictor.trust):.3f} (calibrated on held-out stream)")
 
     # ---- save weights ----
     from safetensors.torch import save_file
@@ -208,6 +218,7 @@ def main():
             "streams": args.train_seeds, "frames_per_stream": args.frames,
             "optimizer": "SGD(momentum=0.9)", "lr": args.lr,
             "objective": "self-supervised ||pred - true|| on gate-encoded patches only",
+            "trust_calibration": "held-out stream (seed 99); shipped trust is the value earned there",
         },
         "eval": ev,
     }

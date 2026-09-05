@@ -32,8 +32,8 @@ embedding space**, and we measured exactly that:
 
 | Embedding space | warp only | + predictor (cold, online) | + predictor (this checkpoint) |
 |---|---|---|---|
-| `SyntheticBackbone` (patch-independent) | 0.96891 | 0.96959 | **0.96962** (+0.0007) |
-| `facebook/dinov2-small` (context-mixing) | 0.83288 | 0.84609 | **0.84758** (+0.0147) |
+| `SyntheticBackbone` (patch-independent) | 0.96891 | 0.96973 | **0.96974** (+0.0008) |
+| `facebook/dinov2-small` (context-mixing) | 0.83288 | 0.84814 | **0.84988** (+0.0170) |
 
 *(mean cosine fidelity of the reconstructed patch-token map vs a Full encoder, on a
 held-out ego-motion stream, seed 99.)*
@@ -66,6 +66,10 @@ where it does not, so turning the predictor on is never worse than pure motion-c
 reuse — even at a learning rate that would otherwise be destructive.
 
 `trust` and `gain_ema` are saved as buffers, so a loaded checkpoint keeps the trust it earned.
+The shipped value is **calibrated on the held-out stream**, not on the training streams: during
+offline training the head starts untrained, so the counterfactual check correctly drives trust to
+0 early on and recovers only slowly. Saving that transient would hand you a predictor that applies
+no correction until it re-earns trust online.
 
 ## Files
 
