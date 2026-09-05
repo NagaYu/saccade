@@ -39,12 +39,12 @@
     "Saccade": {
       "label": "Saccade",
       "frames": 38,
-      "GFLOPs": 64.576,
-      "Joules": 0.0646,
-      "encoded_%": 13.8,
-      "fidelity": 0.7192,
-      "mean_W": 0.01699,
-      "hrs@10kJ": 163.5,
+      "GFLOPs": 65.195,
+      "Joules": 0.0652,
+      "encoded_%": 14.0,
+      "fidelity": 0.837,
+      "mean_W": 0.01716,
+      "hrs@10kJ": 161.9,
       "budget_viol": 0
     }
   },
@@ -55,7 +55,7 @@
       "GFLOPs": 18.034,
       "Joules": 0.018,
       "encoded_%": 3.8,
-      "fidelity": 0.6095,
+      "fidelity": 0.6379,
       "mean_W": 0.00475,
       "hrs@10kJ": 585.3,
       "budget_viol": 0
@@ -66,7 +66,7 @@
       "GFLOPs": 36.041,
       "Joules": 0.036,
       "encoded_%": 7.7,
-      "fidelity": 0.6409,
+      "fidelity": 0.7288,
       "mean_W": 0.00948,
       "hrs@10kJ": 292.9,
       "budget_viol": 0
@@ -74,12 +74,12 @@
     {
       "label": "saccade@0.02",
       "frames": 38,
-      "GFLOPs": 64.576,
-      "Joules": 0.0646,
-      "encoded_%": 13.8,
-      "fidelity": 0.7192,
-      "mean_W": 0.01699,
-      "hrs@10kJ": 163.5,
+      "GFLOPs": 65.195,
+      "Joules": 0.0652,
+      "encoded_%": 14.0,
+      "fidelity": 0.837,
+      "mean_W": 0.01716,
+      "hrs@10kJ": 161.9,
       "budget_viol": 0
     },
     {
@@ -88,7 +88,7 @@
       "GFLOPs": 149.466,
       "Joules": 0.1495,
       "encoded_%": 32.2,
-      "fidelity": 0.8996,
+      "fidelity": 0.9072,
       "mean_W": 0.03933,
       "hrs@10kJ": 70.6,
       "budget_viol": 0
@@ -96,12 +96,12 @@
     {
       "label": "saccade@0.1",
       "frames": 38,
-      "GFLOPs": 302.859,
-      "Joules": 0.3029,
-      "encoded_%": 65.3,
-      "fidelity": 0.9713,
-      "mean_W": 0.0797,
-      "hrs@10kJ": 34.9,
+      "GFLOPs": 303.859,
+      "Joules": 0.3039,
+      "encoded_%": 65.5,
+      "fidelity": 0.9719,
+      "mean_W": 0.07996,
+      "hrs@10kJ": 34.7,
       "budget_viol": 0
     }
   ],

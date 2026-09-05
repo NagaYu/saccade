@@ -35,19 +35,50 @@ class GRUPatchPredictor(nn.Module):
     """
 
     def __init__(self, embed_dim: int, n_patches: int, hidden: int = 128,
-                 motion_dim: int = 6, lr: float = 5e-3, seed: int = 0):
+                 motion_dim: int = 6, lr: float = 1e-3, seed: int = 0,
+                 trust_lr: float = 0.05, trust_init: float = 0.0):
         super().__init__()
         torch.manual_seed(seed)
         self.embed_dim = embed_dim
         self.n_patches = n_patches
         self.hidden = hidden
-        # input per patch: warped cached embedding (D) + per-patch flow (2) + global ego-motion (motion_dim)
-        self.in_dim = embed_dim + 2 + motion_dim
+        # Input per patch: warped cached embedding (D) + per-patch flow (2) +
+        # global ego-motion (motion_dim) + the gate's cheap appearance residual (1).
+        #
+        # That last feature matters more than it looks. Without it the predictor cannot
+        # tell a barely-changed patch from a violently-changed one, so a residual learnt
+        # on the *surprising* patches (the only ones with ground truth at deployment)
+        # gets applied to the *unsurprising* ones — a train/apply mismatch that measurably
+        # degrades the already-good motion-warped cache. Conditioning on the residual lets
+        # it output ~0 correction where nothing happened.
+        self.in_dim = embed_dim + 2 + motion_dim + 1
         self.cell = nn.GRUCell(self.in_dim, hidden)
         self.head = nn.Linear(hidden, embed_dim)
         nn.init.zeros_(self.head.weight)          # start as identity-on-warped-cache (residual = 0)
         nn.init.zeros_(self.head.bias)
         self.opt = torch.optim.SGD(self.parameters(), lr=lr, momentum=0.9)
+
+        # --- trust gate -----------------------------------------------------
+        # The learned residual is only APPLIED in proportion to `trust`, which the
+        # predictor earns by demonstrating (counterfactually, on patches where ground
+        # truth exists anyway) that its correction beats doing nothing.
+        #
+        # This is not belt-and-braces: measurement showed that once motion compensation
+        # is accurate, the remaining residual is by definition the *unpredictable*
+        # innovation, and a learned correction strictly hurts — on the synthetic
+        # backbone (patch-independent embeddings, near-exact warp) fidelity decreases
+        # monotonically with learning rate. On real ViT tokens, which mix global context
+        # through self-attention, warping IS lossy and the correction genuinely helps.
+        # Trust lets one predictor serve both regimes: it decays to ~0 where the warp is
+        # already optimal and rises to ~1 where there is real structure to recover, so
+        # enabling the predictor can never do worse than pure motion-compensated reuse.
+        # Registered as buffers so a published checkpoint carries the trust it earned,
+        # rather than resetting to "prove yourself again" on every load.
+        self.trust_lr = trust_lr
+        self.register_buffer("trust", torch.tensor(float(trust_init)))
+        self.register_buffer("gain_ema", torch.tensor(0.0))
+        self._gain_m = 0.9
+
         self._h: Optional[torch.Tensor] = None    # (P, hidden) hidden state
         self._last_input: Optional[torch.Tensor] = None
         self._last_warped: Optional[torch.Tensor] = None
@@ -61,12 +92,12 @@ class GRUPatchPredictor(nn.Module):
         self._last_h_prev = None
 
     def _build_input(self, warped: torch.Tensor, patch_flow: torch.Tensor,
-                     global_feat: torch.Tensor) -> torch.Tensor:
+                     global_feat: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         gfeat = global_feat.reshape(1, -1).expand(self.n_patches, -1)
-        return torch.cat([warped, patch_flow, gfeat], dim=1)
+        return torch.cat([warped, patch_flow, gfeat, residual], dim=1)
 
     def predict(self, warped: torch.Tensor, patch_flow: np.ndarray,
-                global_feat: np.ndarray) -> torch.Tensor:
+                global_feat: np.ndarray, residual: Optional[np.ndarray] = None) -> torch.Tensor:
         """Predict next-frame embeddings for all patches. Claim: 品質保持.
 
         ``warped`` is the (P, D) motion-compensated cache (from :mod:`saccade.kv_remap`).
@@ -77,12 +108,17 @@ class GRUPatchPredictor(nn.Module):
         """
         flow = torch.as_tensor(patch_flow.reshape(self.n_patches, 2), dtype=torch.float32)
         gfeat = torch.as_tensor(global_feat, dtype=torch.float32)
-        x = self._build_input(warped, flow, gfeat)
+        if residual is None:
+            res = torch.zeros(self.n_patches, 1)
+        else:
+            res = torch.as_tensor(np.asarray(residual, dtype=np.float32).reshape(-1, 1))
+        x = self._build_input(warped, flow, gfeat, res)
         h_prev = self._h if self._h is not None else torch.zeros(self.n_patches, self.hidden)
         with torch.no_grad():
             h = self.cell(x, h_prev)
             residual = self.head(h)
-            pred = warped + residual
+            # apply only the earned fraction of the correction (see trust gate above)
+            pred = warped + float(self.trust) * residual
             pred = pred / (pred.norm(dim=-1, keepdim=True) + 1e-6)
         # Stash the state that PRODUCED this prediction so observe() can retrain on the
         # identical forward pass (h_prev is the hidden BEFORE this step, not after).
@@ -92,7 +128,8 @@ class GRUPatchPredictor(nn.Module):
         self._last_warped = warped.detach()
         return pred
 
-    def observe(self, encoded_indices: torch.Tensor, true_embeddings: torch.Tensor) -> float:
+    def observe(self, encoded_indices: torch.Tensor, true_embeddings: torch.Tensor,
+                trust_mask: Optional[torch.Tensor] = None) -> float:
         """Self-supervised online update on the patches we actually encoded.
 
         Claim: 省エネ / 品質保持. Trains the predictor with zero labels using the fresh
@@ -107,11 +144,35 @@ class GRUPatchPredictor(nn.Module):
         warped = self._last_warped[idx]
         h_prev = self._last_h_prev[idx]      # the pre-step hidden that produced the prediction
         h = self.cell(x, h_prev)
-        pred = warped + self.head(h)
+        pred = warped + self.head(h)          # train the FULL residual, independent of trust
         pred = pred / (pred.norm(dim=-1, keepdim=True) + 1e-6)
         target = true_embeddings.detach()
         loss = ((pred - target) ** 2).sum(dim=-1).mean()
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
+
+        # --- earn (or lose) trust: counterfactual check on these observed patches ---
+        # Would applying the full residual have beaten doing nothing? Both terms are
+        # computable here because these are exactly the patches whose true embedding we
+        # already paid to encode, so the check is free and needs no labels.
+        # ``trust_mask`` selects the subset on which the counterfactual is *valid*: the
+        # gate only hands us ground truth for surprising patches, but the residual is
+        # applied to unsurprising ones, so judging trust on the gated subset measures the
+        # wrong population. The engine therefore passes a handful of randomly explored
+        # (otherwise-skipped) patches, which are drawn from exactly the distribution the
+        # prediction is used on.
+        with torch.no_grad():
+            sel = slice(None) if trust_mask is None else trust_mask.bool()
+            tgt = target[sel]
+            if tgt.shape[0] > 0:
+                w = warped[sel]
+                base = w / (w.norm(dim=-1, keepdim=True) + 1e-6)
+                err_base = (base - tgt).norm(dim=-1).mean()
+                err_pred = (pred.detach()[sel] - tgt).norm(dim=-1).mean()
+                gain = float(err_base - err_pred)      # > 0 => the correction helped
+                self.gain_ema.fill_(self._gain_m * float(self.gain_ema)
+                                    + (1 - self._gain_m) * gain)
+                step = self.trust_lr if float(self.gain_ema) > 0 else -self.trust_lr
+                self.trust.fill_(min(1.0, max(0.0, float(self.trust) + step)))
         return float(loss.detach())

@@ -62,7 +62,13 @@ class SaccadeEngine:
     """
 
     def __init__(self, backbone: VisionBackbone, config: EngineConfig,
-                 measure_fidelity: bool = True, collect_masks: bool = False, seed: int = 0):
+                 measure_fidelity: bool = True, collect_masks: bool = False, seed: int = 0,
+                 train_predictor_on_all: bool = False):
+        # train_predictor_on_all: offline-only. Supervise the predictor on every patch
+        # (requires measure_fidelity so ground truth exists) to remove the gate's
+        # selection bias when producing a publishable checkpoint. Never used in the
+        # deployment path, where only encoded patches have ground truth.
+        self.train_predictor_on_all = train_predictor_on_all
         self.bb = backbone
         self.cfg = config
         self.grid = backbone.grid
@@ -82,6 +88,7 @@ class SaccadeEngine:
             allow_frame_skip=config.allow_frame_skip, tau_init=config.tau,
         )
 
+        self._rng = np.random.default_rng(seed)   # exploration sampling (reproducible)
         self.E_cache = torch.zeros(self.P, self.D)
         self.prev_gray: Optional[np.ndarray] = None
         self.frame_idx = -1
@@ -220,13 +227,20 @@ class SaccadeEngine:
             gray_ref = self.prev_gray
         e_warp = _l2norm(e_warp)
 
+        # ---- cheap per-patch appearance residual (gate signal) --------------
+        # Computed before prediction because the predictor conditions on it: it is the
+        # feature that tells the network whether this patch is in the "nothing happened"
+        # regime (output ~0 correction) or the "something changed" regime.
+        residual = patch_residual(gray, gray_ref, self.grid)
+
         # ---- predict next-frame embeddings ----------------------------------
         # Only trust the predictor when there is motion to predict. On static frames
         # the (un-warped) cache is already the exact previous embedding, so adding a
         # learned residual would only inject drift — reuse the cache verbatim instead.
         use_pred_now = cfg.use_predictor and do_warp
         if use_pred_now:
-            e_pred = self.predictor.predict(e_warp, motion.patch_disp, motion.global_feat)
+            e_pred = self.predictor.predict(e_warp, motion.patch_disp, motion.global_feat,
+                                            residual)
         else:
             e_pred = e_warp
 
@@ -242,7 +256,6 @@ class SaccadeEngine:
                                 np.zeros(self.P, dtype=bool))
 
         # ---- surprisal gate on the motion-compensated residual --------------
-        residual = patch_residual(gray, gray_ref, self.grid)
         forced = (~valid).numpy()
         importance = self.importance.normalized() if cfg.task_aware else None
         self.gate.tau = self.controller.current_tau()
@@ -256,8 +269,21 @@ class SaccadeEngine:
         cand_idx = np.nonzero(decision_mask)[0]
 
         # ---- cap the encode set to the energy budget ------------------------
-        plan = self.controller.afford(len(cand_idx), n_forced=int(forced.sum()))
-        idx = _cap_selection(cand_idx, residual, plan.max_encode, forced)
+        n_explore = int(round(cfg.explore_frac * self.P)) if use_pred_now else 0
+        plan = self.controller.afford(len(cand_idx) + n_explore, n_forced=int(forced.sum()))
+        idx = _cap_selection(cand_idx, residual, min(plan.max_encode, len(cand_idx)), forced)
+
+        # ---- exploration: a few patches the gate would have skipped ---------
+        # Encoded purely so the predictor gets ground truth from the population it is
+        # actually applied to (skipped, low-residual patches). Only when there is budget
+        # to spare — under starvation, real surprises come first.
+        explore_idx = np.empty(0, dtype=int)
+        if n_explore > 0 and plan.max_encode > len(idx):
+            pool = np.setdiff1d(np.arange(self.P), idx)
+            k = min(n_explore, plan.max_encode - len(idx), pool.size)
+            if k > 0:
+                explore_idx = self._rng.choice(pool, size=k, replace=False)
+                idx = np.concatenate([idx, explore_idx])
         idx = np.sort(idx)
 
         # ---- encode the chosen subset; splice fresh + predicted -------------
@@ -272,11 +298,25 @@ class SaccadeEngine:
         if idx.size:
             surp = embedding_surprisal(e_pred[torch.as_tensor(idx, dtype=torch.long)], fresh)
             self.importance.update(idx, surp)
-            if use_pred_now:     # only train the predictor on frames where it was used
-                self.predictor.observe(torch.as_tensor(idx, dtype=torch.long), fresh)
             surprisal_mean = float(surp.mean())
         else:
             self.importance.update(np.array([], dtype=int), np.array([]))
+
+        if use_pred_now:     # only train the predictor on frames where it was used
+            trust_mask = torch.from_numpy(np.isin(idx, explore_idx)) if explore_idx.size else None
+            if self.train_predictor_on_all and e_full is not None:
+                # OFFLINE checkpoint training: supervise on EVERY patch. At deployment we
+                # only have ground truth for gate-encoded (i.e. surprising) patches, but
+                # the prediction is applied to the un-encoded (unsurprising) ones — training
+                # on that biased subset teaches a correction that is wrong where it is used.
+                # When e_full is already being computed we can remove the bias entirely.
+                # offline: every patch is ground truth, so the trust check is unbiased
+                # on the low-residual population without needing exploration
+                low = torch.from_numpy(residual <= self.gate.tau)
+                self.predictor.observe(torch.arange(self.P), e_full, trust_mask=low)
+            elif idx.size:
+                self.predictor.observe(torch.as_tensor(idx, dtype=torch.long), fresh,
+                                       trust_mask=trust_mask)
 
         fidelity = self._fidelity(e_recon, e_full)
         self.E_cache = e_recon.detach()

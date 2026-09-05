@@ -1,0 +1,18 @@
+{
+  "n_frames": 144,
+  "segments": {
+    "event": 28,
+    "static": 20,
+    "turn": 24,
+    "walk": 72
+  },
+  "walk_turn_encode_frac_same_position": 0.4737989008426666,
+  "walk_turn_encode_frac_motion_compensated": 0.002657312899827957,
+  "grid": [
+    14,
+    14
+  ],
+  "img_size": 224,
+  "tau": 0.06,
+  "fps": 10.0
+}

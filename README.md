@@ -5,6 +5,10 @@
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![release](https://img.shields.io/github/v/release/NagaYu/saccade)](https://github.com/NagaYu/saccade/releases)
 
+[![Demo](https://img.shields.io/badge/%F0%9F%A4%97%20Demo-Space-blue)](https://huggingface.co/spaces/NagaYu/saccade)
+[![Model](https://img.shields.io/badge/%F0%9F%A4%97%20Model-saccade--predictor-blue)](https://huggingface.co/NagaYu/saccade-predictor)
+[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-egomotion--bench-blue)](https://huggingface.co/datasets/NagaYu/saccade-egomotion-bench)
+
 **An always-on edge VLM driven by prediction-error gating and an energy budget.**
 *Predict what the next frame will look like; spend compute only where you were wrong; never exceed your energy budget.*
 
@@ -17,12 +21,14 @@ Saccade borrows a trick from biological vision — the world stays smoothly pred
 | Method | Patches re-encoded | Fidelity vs Full | Estimated energy (J) | Mean power | **Runtime on 10 kJ** |
 |---|---|---|---|---|---|
 | **(A) Full** (encode everything, every frame) | 100.0% | 1.000 | 1.264 | 91.6 mW | 30.3 h |
-| **(B) TemporalSim** (same-position frame-diff skipping) | 33.9% | 0.972 | 0.430 | 31.2 mW | 89.1 h |
-| **(C) Saccade** (prediction-error gate + IMU compensation + budget control) | **20.6%** | **0.971** | **0.262** | **19.0 mW** | **146.4 h** |
+| **(B) TemporalSim** (same-position frame-diff skipping) | 33.9% | 0.9723 | 0.430 | 31.2 mW | 89.1 h |
+| **(C) Saccade** (prediction-error gate + IMU compensation + budget control) | **20.7%** | **0.9739** | **0.263** | **19.1 mW** | **145.8 h** |
 
 - **Energy saving**: 4.8× less compute than Full and 1.65× less than TemporalSim,
-- **Quality preservation**: quality on par with TemporalSim (fidelity vs Full: 0.971 ≈ 0.972),
+- **Quality preservation**: *higher* fidelity than TemporalSim (0.9739 vs 0.9723) while spending 39% less energy — better on both axes,
 - **Budget guarantee**: zero budget violations with the controller on (the strict invariant holds for every budget from 0.05 W down to 0.0001 W).
+
+> **Try it in your browser: [🤗 interactive demo](https://huggingface.co/spaces/NagaYu/saccade)** — sweep τ and the energy budget, or switch motion compensation off and watch the advantage disappear.
 
 > Numbers are stored in `benchmarks/results.json`. Energy comes from an analytic FLOP model × `1 pJ/FLOP` (a reasonable figure for efficient mobile inference; change it with `--j-per-flop`).
 
@@ -103,9 +109,15 @@ Docstrings tag claims with their Japanese research labels: 省エネ = energy sa
 ## The four cores in detail
 
 1. **PatchEmbeddingCache + forward predictor** — `predictor.py`, `engine.py`
-   Every patch embedding is cached. A tiny GRU (weights shared across patches) predicts each patch's next-frame embedding from the *motion-compensated cache + pseudo-IMU*.
+   Every patch embedding is cached. A tiny GRU (weights shared across patches) predicts each patch's next-frame embedding from the *motion-compensated cache + pseudo-IMU + the gate's cheap residual*.
    **Fully self-supervised**: it trains online on `||pred − true||` using the true embeddings of patches the gate chose to encode anyway. No labels.
    The prediction is a *residual on top of the warped cache*, so learning starts from identity (residual 0) and only has to model what ego-motion cannot explain.
+
+   ⚠️ **A finding worth stating plainly.** A naive version of this predictor *made things worse* — fidelity decreased monotonically with learning rate, and pure motion-warped reuse beat it. The cause is a train/apply distribution mismatch: ground truth only exists for patches the gate chose to **encode** (the surprising ones), but the prediction is applied to the ones it **skipped** (the unsurprising ones). A correction fitted on the former is simply wrong for the latter. Two mechanisms fix it:
+   - the gate's per-patch residual is fed in as a **feature**, so the network can tell which regime a patch is in;
+   - a **trust scalar** `∈ [0,1]` gates how much of the correction is applied, raised or lowered by a counterfactual check ("would the full residual have beaten doing nothing?") measured on a handful of randomly **explored** patches drawn from the skipped population (`explore_frac`, ~1% of patches — a real energy cost, counted honestly in `n_encoded`).
+
+   The result is a predictor that **cannot backfire**: trust decays toward 0 where the warp is already near-exact (the synthetic backbone: +0.0007) and rises where the warp is lossy (real DINOv2 tokens: **+0.0147**). Its value is precisely proportional to how imperfect motion compensation is — which, once you see it, is the only shape the result could have had.
 
 2. **Surprisal gate** — `gate.py`
    Per patch, threshold the *motion-compensated appearance residual* (a cheap pixel-space proxy) at τ; re-encode only patches above it, reuse cached KV for the rest.
@@ -151,8 +163,16 @@ pytest -q
 
 - `SyntheticBackbone` — dependency-free, deterministic, and **genuinely capable of encoding a subset of patches** (a frozen-random ViT-S/16 stand-in). Default for tests and the reproducible benchmark.
 - `HFVisionBackbone` — exposes the patch tokens of a real HuggingFace ViT/DINOv2 (e.g. `facebook/dinov2-small`). Because of self-attention, subset encoding is an *accounting* approximation (token-caching; see `flops.py`).
-  **Verified**: the full pipeline runs end-to-end on `facebook/dinov2-small` (grid 16×16, D=384; 44-frame short stream; measurements in [benchmarks/results_dinov2.json](benchmarks/results_dinov2.json)). On real DINOv2 features the budget sweep still traces a quality/energy Pareto: against TemporalSim's operating point (0.130 J, fidelity 0.834), **Saccade@0.05 W reaches fidelity 0.900 at 0.149 J** (+0.066 in the same energy band), and @0.1 W reaches 0.971 at 0.303 J (35% less energy than Full's 0.464 J at 97% quality). Zero budget violations in every setting.
-  Honest caveat, also measured: real features mix context through self-attention, so cache-reuse error is larger than with the synthetic encoder and **low-budget quality degrades faster** (0.065 J → fidelity 0.719). Low-budget operation on semantic features is future work.
+  **Verified**: the full pipeline runs end-to-end on `facebook/dinov2-small` (grid 16×16, D=384;
+  44-frame short stream; measurements in [benchmarks/results_dinov2.json](benchmarks/results_dinov2.json)).
+  On real DINOv2 features Saccade **beats TemporalSim on both axes at once**: fidelity 0.837 vs
+  0.834 while spending **half the energy** (0.065 J vs 0.130 J, i.e. 14.0% vs 27.9% of patches
+  re-encoded). The budget sweep traces the full frontier — 0.638 @ 4.8 mW, 0.837 @ 17.2 mW,
+  0.907 @ 39.3 mW, 0.972 @ 80.0 mW — with zero budget violations at every setting.
+  This is where the learned predictor earns its keep: unlike the synthetic encoder, real ViT
+  tokens mix global context through self-attention, so the spatial warp is lossy and there is
+  genuine structure left to predict (+0.0147 fidelity from the published checkpoint; see the
+  [model card](https://huggingface.co/NagaYu/saccade-predictor)).
   Vision towers of VLMs such as moondream2 / SmolVLM can be swapped in through the same API (patch-token exposure).
 
 > **Why is the default synthetic?** The algorithms (predictive gating / motion compensation / budget control) are backbone-agnostic. With the synthetic encoder each patch is an independent function of its pixels, so **subset encoding realizes the savings as real computation** — the energy claim is measured without approximation. The real-ViT path shows the same machinery running on genuine semantics (best for checking quality preservation).
@@ -189,6 +209,18 @@ tests/                 # pytest (verifies energy saving / quality preservation /
 - **Synthetic stream**: the default input is a deterministic synthetic "walking" video (explicitly labelled as such), chosen to evaluate the steady-motion regime reproducibly. Real webcam/mp4 inputs run through the identical pipeline.
 - **No reliance on server-side long-video QA**: nothing here depends on or imitates V-Rex / StreamingTOM-style long-form video QA. The focus is the always-on edge setting.
 - **Quantization/NPU deferred**: correctness on CPU with small models comes first (everything in this README and the tests reproduces on CPU).
+
+---
+
+## Published artifacts
+
+| | |
+|---|---|
+| 🚀 **[Space](https://huggingface.co/spaces/NagaYu/saccade)** | Interactive demo — sweep τ and the budget, toggle motion compensation, scrub frames. Static (precomputed sweep), so no queue or cold start. |
+| 🤖 **[Model](https://huggingface.co/NagaYu/saccade-predictor)** | The forward predictor for two embedding spaces (`SyntheticBackbone`, `dinov2-small`), plus the frozen synthetic backbone for byte-reproducibility. |
+| 📊 **[Dataset](https://huggingface.co/datasets/NagaYu/saccade-egomotion-bench)** | The stream, the per-patch residual maps for **both** decision rules, and per-frame A/B/C measurements — so the central claim is checkable without running this code. |
+
+Rebuild any of them: `python hf/export_model.py`, `python hf/export_dataset.py`, `python hf/space_static/build_data.py`.
 
 ---
 

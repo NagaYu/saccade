@@ -18,3 +18,9 @@ venv/
 # local experiment junk (committed outputs live in figures/ and benchmarks/results.json)
 scratch/
 *.log
+
+# Generated HF artifacts — these live on the Hub, not in git
+hf/model/*.safetensors
+hf/dataset/*.parquet
+hf/space_static/data.json
+hf/space_static/sprite.jpg

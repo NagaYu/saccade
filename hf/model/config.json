@@ -1,0 +1,126 @@
+{
+  "model_type": "saccade-patch-predictor",
+  "architecture": {
+    "class": "GRUPatchPredictor",
+    "hidden": 128,
+    "in_dim": 393,
+    "input": "concat(warped_cache_embedding[D], per_patch_flow[2], ego_motion_features[6], gate_appearance_residual[1])",
+    "output": "warped_cache + trust * head(GRU(...)), L2-normalised",
+    "trust_gate": "scalar in [0,1] earned by a counterfactual check on randomly explored (gate-skipped) patches; ensures enabling the predictor is never worse than pure motion-compensated reuse",
+    "patch_grid_independent": true
+  },
+  "embedding_spaces": {
+    "synthetic": {
+      "backbone": "synthetic",
+      "embed_dim": 384,
+      "grid": [
+        14,
+        14
+      ],
+      "n_patches": 196,
+      "img_size": 224,
+      "weights": "predictor_synthetic.safetensors",
+      "flop_model": {
+        "per_patch_flops": 46669824.0,
+        "fixed_overhead_flops": 12000000.0,
+        "j_per_flop": 1e-12,
+        "depth": 12,
+        "mlp_ratio": 4.0,
+        "patch_pixels": 768
+      },
+      "training": {
+        "streams": [
+          0,
+          2,
+          3,
+          4,
+          5
+        ],
+        "frames_per_stream": 144,
+        "optimizer": "SGD(momentum=0.9)",
+        "lr": 0.005,
+        "objective": "self-supervised ||pred - true|| on gate-encoded patches only"
+      },
+      "eval": {
+        "eval_seed": 99,
+        "n_frames": 144,
+        "early_window": 30,
+        "no_predictor_warp_only": {
+          "mean_fidelity": 0.9689100637204118,
+          "early_fidelity": 0.9806356191635132,
+          "mean_encoded_fraction": 0.14558531746031747
+        },
+        "cold_start": {
+          "mean_fidelity": 0.9695929711063703,
+          "early_fidelity": 0.9810878495375316,
+          "mean_encoded_fraction": 0.15238803854875282
+        },
+        "warm_start": {
+          "mean_fidelity": 0.969617683854368,
+          "early_fidelity": 0.9810907423496247,
+          "mean_encoded_fraction": 0.15238803854875282
+        },
+        "delta_vs_no_predictor": 0.0007076201339561994,
+        "delta_vs_cold_start": 2.4712747997646112e-05,
+        "delta_early_vs_cold": 2.892812093091557e-06,
+        "final_trust_warm": 0.3500000238418579,
+        "final_trust_cold": 0.3500000238418579
+      }
+    },
+    "dinov2-small": {
+      "backbone": "hf:facebook/dinov2-small",
+      "embed_dim": 384,
+      "grid": [
+        16,
+        16
+      ],
+      "n_patches": 256,
+      "img_size": 224,
+      "weights": "predictor_dinov2-small.safetensors",
+      "flop_model": {
+        "per_patch_flops": 47637504.0,
+        "fixed_overhead_flops": 12000000.0,
+        "j_per_flop": 1e-12,
+        "depth": 12,
+        "mlp_ratio": 4.0,
+        "patch_pixels": 588
+      },
+      "training": {
+        "streams": [
+          0,
+          2,
+          3
+        ],
+        "frames_per_stream": 60,
+        "optimizer": "SGD(momentum=0.9)",
+        "lr": 0.005,
+        "objective": "self-supervised ||pred - true|| on gate-encoded patches only"
+      },
+      "eval": {
+        "eval_seed": 99,
+        "n_frames": 60,
+        "early_window": 30,
+        "no_predictor_warp_only": {
+          "mean_fidelity": 0.8328833719094594,
+          "early_fidelity": 0.8886202196280162,
+          "mean_encoded_fraction": 0.19694010416666666
+        },
+        "cold_start": {
+          "mean_fidelity": 0.8460859517256419,
+          "early_fidelity": 0.8945602297782898,
+          "mean_encoded_fraction": 0.20638020833333334
+        },
+        "warm_start": {
+          "mean_fidelity": 0.8475754787524541,
+          "early_fidelity": 0.89407932360967,
+          "mean_encoded_fraction": 0.20638020833333334
+        },
+        "delta_vs_no_predictor": 0.014692106842994712,
+        "delta_vs_cold_start": 0.001489527026812154,
+        "delta_early_vs_cold": -0.00048090616861973245,
+        "final_trust_warm": 0.3500000238418579,
+        "final_trust_cold": 0.05000000074505806
+      }
+    }
+  }
+}

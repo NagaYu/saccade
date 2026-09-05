@@ -45,7 +45,10 @@ class EngineConfig:
 
     # --- bootstrap / online learning ---
     warmup_frames: int = 6            # frames fully encoded at the start to seed cache + predictor
-    online_lr: float = 5e-3           # predictor online SGD step size
+    online_lr: float = 1e-3           # predictor online SGD step size
+    explore_frac: float = 0.01        # fraction of otherwise-skipped patches encoded per frame to
+                                      # give the predictor UNBIASED feedback (see predictor trust gate).
+                                      # Costs real energy, so it is counted in n_encoded.
 
     # --- baseline selection ---
     mode: str = "saccade"             # "full" | "temporalsim" | "saccade"
