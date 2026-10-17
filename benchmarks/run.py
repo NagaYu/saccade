@@ -127,11 +127,11 @@ def fig_quality_energy(res, summaries, sweep, path):
         ys = [s.mean_fidelity for s in sweep]
         ax.plot(xs, ys, "-o", color=COND_COLORS["Saccade"], label="Saccade (budget sweep)", zorder=2)
         for s in sweep:
-            ax.annotate(f"{s.mean_power_watts*1000:.1f} mW", (s.total_joules, s.mean_fidelity),
+            ax.annotate(f"{s.mean_encoded_fraction*100:.0f}% re-encoded", (s.total_joules, s.mean_fidelity),
                         fontsize=7, xytext=(4, -8), textcoords="offset points", color="#2166ac")
-    ax.set_xlabel("energy over stream (J)  —  lower is better")
+    ax.set_xlabel("modelled compute over stream (J, FLOPs × 1 pJ/FLOP)  —  lower is better")
     ax.set_ylabel("fidelity vs Full encoder  —  higher is better")
-    ax.set_title("Quality / energy trade-off (up-and-left is better)")
+    ax.set_title("Quality / modelled-compute trade-off (up-and-left is better)")
     ax.legend(); ax.grid(alpha=0.25)
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
 
@@ -196,7 +196,7 @@ def make_gif(frames, res_b, res_c, labels, path, img_size, stride=2, max_frames=
         pad = np.full((44, img_size, 3), 245, np.uint8)
         img = np.vstack([pad, img])
         cv2.putText(img, title, (6, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (20, 20, 20), 1, cv2.LINE_AA)
-        cv2.putText(img, f"encode {enc_pct:4.0f}%   {cumj*1000:6.1f} mJ", (6, 36),
+        cv2.putText(img, f"encode {enc_pct:4.0f}%  {cumj*1000:6.1f} mJ*", (6, 36),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 30, 30), 1, cv2.LINE_AA)
         return img
 
@@ -209,8 +209,8 @@ def make_gif(frames, res_b, res_c, labels, path, img_size, stride=2, max_frames=
         sep = np.full((left.shape[0], 4, 3), 255, np.uint8)
         combo = np.hstack([left, sep, right])
         band = np.full((22, combo.shape[1], 3), 255, np.uint8)
-        cv2.putText(band, f"segment: {labels[i]}   (red = patches re-encoded this frame)", (6, 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 60), 1, cv2.LINE_AA)
+        cv2.putText(band, f"segment: {labels[i]}   red = re-encoded   *modelled compute, 1 pJ/FLOP",
+                    (6, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (60, 60, 60), 1, cv2.LINE_AA)
         combo = np.vstack([combo, band])
         gif_frames.append(Image.fromarray(combo))
     gif_frames[0].save(path, save_all=True, append_images=gif_frames[1:], duration=120, loop=0)

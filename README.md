@@ -27,7 +27,7 @@
 **An always-on edge VLM driven by prediction-error gating and an energy budget.**
 *Predict what the next frame will look like; spend compute only where you were wrong; never exceed your energy budget.*
 
-Saccade borrows a trick from biological vision — the world stays smoothly predictable while your head moves — and cuts the power draw of an always-on edge VLM by **never re-encoding a patch it could predict**. The key is *ego-motion compensation*: when the camera moves, almost every pixel changes, but **subtract the motion and the residual of a static world is nearly zero**. Existing "frame-similarity" skipping cannot skip steady motion at all; Saccade skips most of it.
+Saccade borrows a trick from biological vision — the world stays smoothly predictable while your head moves — and cuts the compute of an always-on edge VLM by **never re-encoding a patch it could predict**. The key is *ego-motion compensation*: when the camera moves, almost every pixel changes, but **subtract the motion and the residual of a static world is nearly zero**. Existing "frame-similarity" skipping cannot skip steady motion at all; Saccade skips most of it.
 
 ---
 
@@ -52,19 +52,19 @@ in core 1 below.
 
 ## TL;DR (synthetic walking stream, CPU, ViT-S/16-class encoder)
 
-| Method | Patches re-encoded | Fidelity vs Full | Estimated energy (J) | Mean power | **Runtime on 10 kJ** |
-|---|---|---|---|---|---|
-| **(A) Full** (encode everything, every frame) | 100.0% | 1.000 | 1.264 | 91.6 mW | 30.3 h |
-| **(B) TemporalSim** (same-position frame-diff skipping) | 33.9% | 0.9723 | 0.430 | 31.2 mW | 89.1 h |
-| **(C) Saccade** (prediction-error gate + IMU compensation + budget control) | **20.7%** | **0.9739** | **0.263** | **19.1 mW** | **145.8 h** |
+| Method | Patches re-encoded | Fidelity vs Full | Modelled compute (J, FLOPs × 1 pJ/FLOP) |
+|---|---|---|---|
+| **(A) Full** (encode everything, every frame) | 100.0% | 1.000 | 1.264 |
+| **(B) TemporalSim** (same-position frame-diff skipping) | 33.9% | 0.9723 | 0.430 |
+| **(C) Saccade** (prediction-error gate + IMU compensation + budget control) | **20.7%** | **0.9739** | **0.263** |
 
-- **Energy saving**: 4.8× less compute than Full and 1.65× less than TemporalSim,
-- **Quality preservation**: *higher* fidelity than TemporalSim (0.9739 vs 0.9723) while spending 39% less energy — better on both axes,
+- **Compute reduction (modelled)**: 4.8× fewer patch encodes than Full and 1.64× fewer than TemporalSim,
+- **Quality preservation**: *higher* fidelity than TemporalSim (0.9739 vs 0.9723) while spending 39% less modelled compute — better on both axes,
 - **Budget guarantee**: zero budget violations with the controller on (the strict invariant holds for every budget from 0.05 W down to 0.0001 W).
 
 > **Try it in your browser: [🤗 interactive demo](https://huggingface.co/spaces/NagaYu/saccade)** — sweep τ and the energy budget, or switch motion compensation off and watch the advantage disappear.
 
-> Numbers are stored in `benchmarks/results.json`. Energy comes from an analytic FLOP model × `1 pJ/FLOP` (a reasonable figure for efficient mobile inference; change it with `--j-per-flop`).
+> Numbers are stored in `benchmarks/results.json`. The J column is modelled compute: an analytic FLOP model × `1 pJ/FLOP` (a reasonable figure for efficient mobile inference; change it with `--j-per-flop`). It is not a measurement of energy.
 
 ---
 
@@ -83,10 +83,10 @@ This is the heart of Saccade: don't ask "did the pixels change?" — ask "**did 
 
 During `walk`/`turn` (predictable ego-motion) segments, **B is stuck re-encoding 42–64%** while **C thins the load to ~14%**. On `static` (no motion) and `event` (an independently moving object = genuine change) segments the two behave almost identically — i.e. C **still catches real change** (no cheating).
 
-### Quality / energy trade-off
-![quality vs energy](figures/quality_energy.png)
+### Quality / modelled-compute trade-off
+![quality vs modelled compute](figures/quality_energy.png)
 
-Just by varying the budget B, Saccade sweeps a Pareto frontier that **dominates** TemporalSim's single operating point (same quality at lower energy, or higher quality at the same energy).
+Just by varying the budget B, Saccade sweeps a Pareto frontier that **dominates** TemporalSim's single operating point (same quality at lower modelled compute, or higher quality at the same modelled compute).
 
 ### Webcam-style demo (B vs C; red = patches re-encoded this frame)
 ![demo](figures/saccade_demo.gif)
@@ -130,11 +130,11 @@ flowchart TB
 
 ## Claims → code (every function's docstring states which claim it demonstrates)
 
-Docstrings tag claims with their Japanese research labels: 省エネ = energy saving, 品質保持 = quality preservation, 予算保証 = budget guarantee.
+Docstrings tag claims with their Japanese research labels: 省エネ = compute reduction (modelled) — the tag literally reads "energy saving", but in this project it only ever refers to modelled compute; 品質保持 = quality preservation; 予算保証 = budget guarantee.
 
 | Claim | Where it is demonstrated |
 |---|---|
-| **Energy saving** | `gate.py` (encode only the surprising few), `kv_remap.py` (motion compensation cuts recomputation), `flops.py` (FLOP→J is monotone in encode count) |
+| **Compute reduction (modelled)** | `gate.py` (encode only the surprising few), `kv_remap.py` (motion compensation cuts recomputation), `flops.py` (FLOP→J is monotone in encode count) |
 | **Quality preservation** | `predictor.py` (predicts values for un-encoded patches), fidelity in `engine.py` (cosine of reconstruction vs Full), the gate's task-aware/forced paths |
 | **Budget guarantee** | `energy_controller.py` (token bucket enforces `cum_J ≤ B·t + E0` by construction; on starvation, frame-drop yields an anytime degraded output) |
 
@@ -164,7 +164,7 @@ Docstrings tag claims with their Japanese research labels: 省エネ = energy sa
 
 4. **Energy budget controller** — `energy_controller.py`
    Simple energy model: `J = (encoder + LLM-prefill FLOPs) × [J/FLOP]`. Given a budget `B [J/s]`:
-   **(1) soft loop** — proportional control adapts τ so average power tracks B (spend the budget you have; maximize utility);
+   **(1) soft loop** — proportional control adapts τ so average modelled power tracks B (spend the budget you have; maximize utility);
    **(2) hard cap** — a token bucket (capacity `E0 = reserve·B`, refill `B/fps` per frame) enforces
    `cumulative energy ≤ B·t + E0` for all t **by construction**. When the bucket runs dry the frame is dropped entirely and the previous cache is returned as an **anytime degraded output** (there is always a valid output).
 
@@ -200,16 +200,17 @@ pytest -q
   **Verified**: the full pipeline runs end-to-end on `facebook/dinov2-small` (grid 16×16, D=384;
   44-frame short stream; measurements in [benchmarks/results_dinov2.json](benchmarks/results_dinov2.json)).
   On real DINOv2 features Saccade **beats TemporalSim on both axes at once**: fidelity 0.837 vs
-  0.834 while spending **half the energy** (0.065 J vs 0.130 J, i.e. 14.0% vs 27.9% of patches
-  re-encoded). The budget sweep traces the full frontier — 0.638 @ 4.8 mW, 0.837 @ 17.2 mW,
-  0.907 @ 39.3 mW, 0.972 @ 80.0 mW — with zero budget violations at every setting.
+  0.834 while spending **half the modelled compute** (0.065 J vs 0.130 J of modelled compute,
+  i.e. 14.0% vs 27.9% of patches re-encoded). The budget sweep traces the full frontier —
+  fidelity 0.638 / 0.837 / 0.907 / 0.972 at 3.8% / 14.0% / 32.2% / 65.5% of patches re-encoded
+  (0.018 / 0.065 / 0.150 / 0.304 J of modelled compute) — with zero budget violations at every setting.
   This is where the learned predictor earns its keep: unlike the synthetic encoder, real ViT
   tokens mix global context through self-attention, so the spatial warp is lossy and there is
   genuine structure left to predict (+0.0170 fidelity from the published checkpoint; see the
   [model card](https://huggingface.co/NagaYu/saccade-predictor)).
   Vision towers of VLMs such as moondream2 / SmolVLM can be swapped in through the same API (patch-token exposure).
 
-> **Why is the default synthetic?** The algorithms (predictive gating / motion compensation / budget control) are backbone-agnostic. With the synthetic encoder each patch is an independent function of its pixels, so **subset encoding realizes the savings as real computation** — the energy claim is measured without approximation. The real-ViT path shows the same machinery running on genuine semantics (best for checking quality preservation).
+> **Why is the default synthetic?** The algorithms (predictive gating / motion compensation / budget control) are backbone-agnostic. With the synthetic encoder each patch is an independent function of its pixels, so **the compute reduction is realized as real computation, not as an accounting approximation**. The real-ViT path shows the same machinery running on genuine semantics (best for checking quality preservation).
 
 ---
 
@@ -231,14 +232,14 @@ benchmarks/
   run.py               # A/B/C comparison, figures, GIF, results.json
   results.json         # latest measurements
 figures/               # generated artifacts (PNGs + demo GIF)
-tests/                 # pytest (verifies energy saving / quality preservation / budget guarantee)
+tests/                 # pytest (verifies compute reduction / quality preservation / budget guarantee)
 ```
 
 ---
 
 ## Honest caveats
 
-- **Energy is an analytic model**: estimated as `FLOPs × [J/FLOP]`, not measured Joules. The relative comparison (A/B/C) and the budget-guarantee logic are sound; absolute values depend on the coefficient (`--j-per-flop`).
+- **Energy is an analytic model**: estimated as `FLOPs × [J/FLOP]`, not measured Joules. The relative comparison (A/B/C) and the budget-guarantee logic are sound; absolute values depend on the coefficient (`--j-per-flop`). See STATUS at the top.
 - **Token-caching approximation**: in a real ViT, self-attention mixes patch tokens, so subset-encode savings are accounted as "recompute only that token, reuse cached KV for the rest". Realizing this on hardware needs block-sparse attention (this prototype measures *decision quality* and *modelled energy*). The synthetic backbone realizes the savings as real computation.
 - **Synthetic stream**: the default input is a deterministic synthetic "walking" video (explicitly labelled as such), chosen to evaluate the steady-motion regime reproducibly. Real webcam/mp4 inputs run through the identical pipeline.
 - **No reliance on server-side long-video QA**: nothing here depends on or imitates V-Rex / StreamingTOM-style long-form video QA. The focus is the always-on edge setting.
