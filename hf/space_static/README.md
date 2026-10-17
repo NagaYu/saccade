@@ -38,7 +38,7 @@ Don't ask *"did the pixels change?"* — ask **"did anything change that ego-mot
 ## Why this is a static Space
 
 Every configuration in the parameter grid was precomputed offline with the same code the
-repository's 30 tests exercise, then shipped as JSON. So there is no backend, no queue and no
+repository's 32 tests exercise, then shipped as JSON. So there is no backend, no queue and no
 cold start — and the numbers are exactly reproducible from the repo.
 
 ## Honest notes
