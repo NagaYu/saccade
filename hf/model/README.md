@@ -7,7 +7,24 @@ tags:
   - video
   - vision-transformer
   - streaming
+  - negative-results
+  - closed
 ---
+
+> ## STATUS: closed — superseded on the energy claim
+>
+> **EPIC (arXiv 2606.15859) reports a 24.3× average energy reduction for gated
+> always-on perception on AR glasses, using reference-frame comparison to skip
+> frames during head stability. This project is in the same family and does not
+> compete on that metric. No energy-reduction figure is claimed here.**
+>
+> Energy numbers in this project come from an analytic FLOP model
+> (`FLOPs × [J/FLOP]`), not from a power meter. That is not a limitation to be
+> fixed later — it is the reason no reduction figure is claimed.
+>
+> What remains measured and uncontested is the **trust gate**: a correction for
+> selection bias under gating. See "The trust gate" below. This is the part of
+> the work that continues.
 
 # Saccade patch predictor
 
@@ -22,6 +39,66 @@ This is the learned component of [**Saccade**](https://github.com/NagaYu/saccade
 - 💻 **Code**: https://github.com/NagaYu/saccade
 - 📊 **Benchmark dataset**: https://huggingface.co/datasets/NagaYu/saccade-egomotion-bench
 - 🚀 **Interactive demo**: https://huggingface.co/spaces/NagaYu/saccade
+
+## The trust gate: correcting selection bias under gating
+
+This is the main contribution of this artifact.
+
+### The problem
+
+At deployment, ground truth only exists for patches the gate chose to *encode* (the
+surprising ones). But the prediction is applied to the patches the gate *skipped* (the
+unsurprising ones). A correction fitted on the former is wrong for the latter.
+
+### It is not specific to Saccade
+
+Any system that decides for itself when to look has this problem, because the decision that
+saves energy is the same decision that selects which outcomes get observed. A frame-skipping
+pipeline only sees full-quality truth on the frames it processed — the ones that looked
+different. A duty-cycled sensor only reports while it is awake, and it is woken by events.
+A per-patch encoder only re-measures the patches whose cheap proxy fired. In every case, any
+model of "what happened while we weren't looking" that is trained on what was looked at is
+trained on a biased sample, and the bias points exactly where it will be applied: toward large
+changes, when it is used on small ones. Nothing about this needs a learned predictor to go
+wrong; it only needs a correction that is fitted on observed outcomes and applied to
+unobserved ones.
+
+### What happened here
+
+An earlier version of this predictor **made things worse**: fidelity decreased monotonically
+with learning rate, and doing nothing (pure motion-warped reuse) beat it at every setting.
+Measured on the held-out stream (seed 99, `SyntheticBackbone`, before the fix):
+
+| learning rate | 0 (no learning) | 1e-5 | 1e-4 | 5e-4 | 1e-3 | 5e-3 | 2e-2 |
+|---|---|---|---|---|---|---|---|
+| fidelity | 0.96891 | 0.96889 | 0.96868 | 0.96763 | 0.96660 | 0.96297 | 0.95935 |
+
+The learnt head converged to an almost constant correction: fitted on surprising patches,
+added to every unsurprising one.
+
+### The two fixes (both are in this checkpoint)
+
+1. **Residual conditioning** — the gate's cheap per-patch appearance residual is an input
+   feature, so the network can tell which regime a patch is in.
+2. **An earned trust scalar** — the applied correction is `warped + trust · residual`, where
+   `trust ∈ [0,1]` is raised or lowered by a counterfactual check ("would the full residual
+   have beaten doing nothing?") evaluated on a handful of randomly *explored* patches drawn
+   from the skipped population — i.e. the distribution the prediction is actually used on.
+   Exploration costs real energy (`explore_frac`, ~1% of patches) and is counted as encoding.
+
+### Result
+
+Trust settles around 0.35–0.50 where the residual helps and decays toward 0 where it does
+not, so turning the predictor on is never worse than pure motion-compensated reuse — even at a
+learning rate that would otherwise be destructive. This is an empirical property, checked by
+regression tests (`test_trust_gate_prevents_predictor_from_backfiring` at a benign and a
+destructive learning rate; `test_trust_decays_when_residual_is_useless`), not a theorem.
+
+`trust` and `gain_ema` are saved as buffers, so a loaded checkpoint keeps the trust it earned.
+The shipped value is **calibrated on the held-out stream**, not on the training streams: during
+offline training the head starts untrained, so the counterfactual check correctly drives trust to
+0 early on and recovers only slowly. Saving that transient would hand you a predictor that applies
+no correction until it re-earns trust online.
 
 ## What this is (and honestly, what it is not)
 
@@ -43,33 +120,6 @@ pixels, a spatial warp is nearly exact, the residual left over is by definition 
 *unpredictable* innovation, and there is almost nothing to learn. Where tokens mix global
 context through self-attention (any real ViT), warping is a cruder approximation and the
 predictor recovers a meaningful chunk of the loss.
-
-## The trust gate — why enabling this can't backfire
-
-An earlier version of this predictor **made things worse**: fidelity decreased monotonically
-with learning rate. The cause was a train/apply distribution mismatch — at deployment,
-ground truth only exists for patches the gate chose to *encode* (the surprising ones), but
-the prediction is applied to the patches it *skipped* (the unsurprising ones). A correction
-fitted on the former is wrong for the latter.
-
-Two mechanisms fix it, and both are in this checkpoint:
-
-1. **Residual conditioning** — the gate's cheap per-patch appearance residual is an input
-   feature, so the network can tell which regime a patch is in.
-2. **An earned trust scalar** — the applied correction is `warped + trust · residual`, where
-   `trust ∈ [0,1]` is raised or lowered by a counterfactual check ("would the full residual
-   have beaten doing nothing?") evaluated on a handful of randomly *explored* patches drawn
-   from the skipped population — i.e. the distribution the prediction is actually used on.
-
-The result: trust settles around 0.35–0.50 where the residual helps and decays toward 0
-where it does not, so turning the predictor on is never worse than pure motion-compensated
-reuse — even at a learning rate that would otherwise be destructive.
-
-`trust` and `gain_ema` are saved as buffers, so a loaded checkpoint keeps the trust it earned.
-The shipped value is **calibrated on the held-out stream**, not on the training streams: during
-offline training the head starts untrained, so the counterfactual check correctly drives trust to
-0 early on and recovers only slowly. Saving that transient would hand you a predictor that applies
-no correction until it re-earns trust online.
 
 ## Files
 
@@ -129,9 +179,23 @@ Reproduce with [`hf/export_model.py`](https://github.com/NagaYu/saccade/blob/mai
 - The predictor is tied to its embedding space; there is no cross-backbone transfer.
 - Energy figures throughout the project come from an analytic FLOP model
   (`FLOPs × [J/FLOP]`), not from a power meter.
-- The gain on the synthetic space (+0.0007) is small enough to be within run-to-run noise
+- The gain on the synthetic space (+0.0008) is small enough to be within run-to-run noise
   for practical purposes — it is reported because the *shape* of the result matters, not
   because that checkpoint is impressive.
+
+## References
+
+These are prior or concurrent work in the same problem area.
+
+- **EPIC** — T. Xia, H. Wang, J. Zheng, S. Chen, S. Q. Zhang. *EPIC: A System Framework for
+  Efficient Egocentric Perception on Embodied AR Glasses.* arXiv:2606.15859, 2026.
+  https://arxiv.org/abs/2606.15859
+- **EgoTrigger** — A. Paruchuri et al. *EgoTrigger: Toward Audio-Driven Image Capture for Human
+  Memory Enhancement in All-Day Energy-Efficient Smart Glasses.* arXiv:2508.01915, 2025.
+  https://arxiv.org/abs/2508.01915
+- **Ego-METAS** — M. Santos-Villafranca et al. *Ego-METAS: Egocentric online Multimodal
+  Energy-efficient Temporal Action Segmentation benchmark.* arXiv:2606.02246, 2026.
+  https://arxiv.org/abs/2606.02246
 
 ## License
 

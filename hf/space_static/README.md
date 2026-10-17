@@ -17,6 +17,8 @@ tags:
 
 # Saccade 👁️⚡
 
+Note: this project makes no energy-reduction claim. See the [model card](https://huggingface.co/NagaYu/saccade-predictor) for why.
+
 Interactive demo for [**Saccade**](https://github.com/NagaYu/saccade): an always-on edge VLM
 that spends encoder compute only where a forward prediction was wrong, under a hard energy
 budget.

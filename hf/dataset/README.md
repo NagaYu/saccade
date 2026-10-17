@@ -19,6 +19,11 @@ configs:
     data_files: measurements/*.parquet
 ---
 
+> ## STATUS: maintained
+>
+> The model ([NagaYu/saccade-predictor](https://huggingface.co/NagaYu/saccade-predictor)) is
+> closed, but this dataset remains available and maintained.
+
 # Saccade ego-motion benchmark
 
 The stream, the raw decision signals, and the per-frame measurements behind
@@ -26,6 +31,8 @@ The stream, the raw decision signals, and the per-frame measurements behind
 the image patches whose change ego-motion cannot explain.
 
 This dataset exists so the central claim can be **checked without running our code**.
+
+**This is scripted synthetic ego-motion, not natural first-person video.** See [Limitations](#limitations--please-read) before drawing conclusions from it.
 
 - 💻 **Code**: https://github.com/NagaYu/saccade
 - 🤖 **Model**: https://huggingface.co/NagaYu/saccade-predictor

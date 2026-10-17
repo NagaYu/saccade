@@ -9,10 +9,44 @@
 [![Model](https://img.shields.io/badge/%F0%9F%A4%97%20Model-saccade--predictor-blue)](https://huggingface.co/NagaYu/saccade-predictor)
 [![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-egomotion--bench-blue)](https://huggingface.co/datasets/NagaYu/saccade-egomotion-bench)
 
+> ## STATUS: closed — superseded on the energy claim
+>
+> **EPIC (arXiv 2606.15859) reports a 24.3× average energy reduction for gated
+> always-on perception on AR glasses, using reference-frame comparison to skip
+> frames during head stability. This project is in the same family and does not
+> compete on that metric. No energy-reduction figure is claimed here.**
+>
+> Energy numbers in this project come from an analytic FLOP model
+> (`FLOPs × [J/FLOP]`), not from a power meter. That is not a limitation to be
+> fixed later — it is the reason no reduction figure is claimed.
+>
+> What remains measured and uncontested is the **trust gate**: a correction for
+> selection bias under gating. See "The trust gate" below. This is the part of
+> the work that continues.
+
 **An always-on edge VLM driven by prediction-error gating and an energy budget.**
 *Predict what the next frame will look like; spend compute only where you were wrong; never exceed your energy budget.*
 
 Saccade borrows a trick from biological vision — the world stays smoothly predictable while your head moves — and cuts the power draw of an always-on edge VLM by **never re-encoding a patch it could predict**. The key is *ego-motion compensation*: when the camera moves, almost every pixel changes, but **subtract the motion and the residual of a static world is nearly zero**. Existing "frame-similarity" skipping cannot skip steady motion at all; Saccade skips most of it.
+
+---
+
+## The trust gate
+
+At deployment, ground truth only exists for patches the gate chose to *encode* (the
+surprising ones), but the prediction is applied to the patches it *skipped* (the
+unsurprising ones) — so a correction fitted on the former is wrong for the latter. This
+selection bias is not specific to Saccade: it arises in any system that decides for itself
+when to look (frame skipping, sensor duty cycling, per-patch encoding decisions).
+
+The naive predictor here measurably made things worse (fidelity fell monotonically with
+learning rate). Conditioning on the gate's residual plus a **trust scalar** — earned by a
+counterfactual check on randomly explored, otherwise-skipped patches — fixes it: trust
+settles around 0.35–0.50 where the correction helps and decays toward 0 where it does not,
+so enabling the predictor was never worse than pure motion-compensated reuse in any setting
+we measured. Full write-up, the degradation record and the measured table:
+**[model card → The trust gate](https://huggingface.co/NagaYu/saccade-predictor)**; mechanism
+in core 1 below.
 
 ---
 
@@ -117,7 +151,7 @@ Docstrings tag claims with their Japanese research labels: 省エネ = energy sa
    - the gate's per-patch residual is fed in as a **feature**, so the network can tell which regime a patch is in;
    - a **trust scalar** `∈ [0,1]` gates how much of the correction is applied, raised or lowered by a counterfactual check ("would the full residual have beaten doing nothing?") measured on a handful of randomly **explored** patches drawn from the skipped population (`explore_frac`, ~1% of patches — a real energy cost, counted honestly in `n_encoded`).
 
-   The result is a predictor that **cannot backfire**: trust decays toward 0 where the warp is already near-exact (the synthetic backbone: +0.0007) and rises where the warp is lossy (real DINOv2 tokens: **+0.0147**). Its value is precisely proportional to how imperfect motion compensation is — which, once you see it, is the only shape the result could have had.
+   The result is a predictor that **cannot backfire**: trust decays toward 0 where the warp is already near-exact (the synthetic backbone: +0.0008) and rises where the warp is lossy (real DINOv2 tokens: **+0.0170**). Its value is precisely proportional to how imperfect motion compensation is — which, once you see it, is the only shape the result could have had.
 
 2. **Surprisal gate** — `gate.py`
    Per patch, threshold the *motion-compensated appearance residual* (a cheap pixel-space proxy) at τ; re-encode only patches above it, reuse cached KV for the rest.
@@ -171,7 +205,7 @@ pytest -q
   0.907 @ 39.3 mW, 0.972 @ 80.0 mW — with zero budget violations at every setting.
   This is where the learned predictor earns its keep: unlike the synthetic encoder, real ViT
   tokens mix global context through self-attention, so the spatial warp is lossy and there is
-  genuine structure left to predict (+0.0147 fidelity from the published checkpoint; see the
+  genuine structure left to predict (+0.0170 fidelity from the published checkpoint; see the
   [model card](https://huggingface.co/NagaYu/saccade-predictor)).
   Vision towers of VLMs such as moondream2 / SmolVLM can be swapped in through the same API (patch-token exposure).
 
