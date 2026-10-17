@@ -71,7 +71,7 @@
         <input type="range" id="tau" min="0" max="3" step="1" value="1">
       </div>
       <div>
-        <label>energy budget <span class="val" id="budv"></span></label>
+        <label>budget (modelled compute rate) <span class="val" id="budv"></span></label>
         <input type="range" id="bud" min="0" max="4" step="1" value="3">
       </div>
       <div class="toggle">
@@ -80,8 +80,8 @@
       </div>
     </div>
     <table>
-      <thead><tr><th>method</th><th>re-encoded</th><th>fidelity</th><th>energy</th>
-                 <th>power</th><th>hrs @10kJ</th><th>budget viol.</th></tr></thead>
+      <thead><tr><th>method</th><th>re-encoded</th><th>fidelity</th>
+                 <th>modelled compute</th><th>budget viol.</th></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
     <div class="verdict" id="verdict"></div>
@@ -128,14 +128,17 @@
     <div class="note">
       • The stream is <b>deterministic synthetic ego-motion</b>, not natural video — a
       controlled apparatus so the steady-motion claim is exactly reproducible.<br>
-      • Energy is an <b>analytic FLOP model</b> (FLOPs × 1 pJ/FLOP), not a power meter.
-      Relative comparisons and the budget guarantee are sound; absolute Joules depend on
-      that coefficient.<br>
+      • The J column is <b>modelled compute</b>: an analytic FLOP model (FLOPs × 1 pJ/FLOP),
+      not a power meter and not a measurement of energy. Relative comparisons and the budget
+      guarantee are sound; absolute Joules depend on that coefficient. This project makes
+      <b>no energy-reduction claim</b> — see the
+      <a href="https://huggingface.co/NagaYu/saccade-predictor">model card</a> for why.<br>
       • Results use the dependency-free <b>SyntheticBackbone</b>, where each patch embedding
-      is genuinely independent so subset encoding realizes real savings. On a real ViT
+      is genuinely independent so the compute reduction is realized as real computation,
+      not as an accounting approximation. On a real ViT
       (DINOv2-small) the same machinery runs but degrades faster at low budgets — see the repo.<br>
       • This page is a <b>static</b> Space: every configuration was precomputed offline with
-      the same code the repo's 30 tests exercise, so there is no backend to wait for.
+      the same code the repo's 32 tests exercise, so there is no backend to wait for.
     </div>
   </div>
 </div>
@@ -159,8 +162,7 @@ const curB=()=>D.temporalsim[String(tauOf())];
 const curC=()=>D.saccade[`${tauOf()}|${budOf()}|${$("mc").checked?1:0}`];
 
 function fmt(s,isFull){return `<td>${(s.enc*100).toFixed(1)}%</td><td>${s.fid.toFixed(4)}</td>
-  <td>${s.J.toFixed(3)} J</td><td>${s.mW.toFixed(1)} mW</td><td>${s.hrs.toFixed(1)}</td>
-  <td>${isFull?"—":s.viol}</td>`;}
+  <td>${s.J.toFixed(3)} J</td><td>${isFull?"—":s.viol}</td>`;}
 
 function render(){
   $("tauv").textContent=tauOf().toFixed(2);
@@ -171,7 +173,7 @@ function render(){
      <tr><td><span class="dot" style="background:${C.TemporalSim}"></span>TemporalSim</td>${fmt(B,1)}</tr>
      <tr class="sacc"><td><span class="dot" style="background:${C.Saccade}"></span>Saccade</td>${fmt(S,0)}</tr>`;
   const vF=(1-S.J/F.J)*100, vB=(1-S.J/B.J)*100;
-  $("verdict").innerHTML=`<b>Saccade used ${vF.toFixed(0)}% less energy than Full</b> and
+  $("verdict").innerHTML=`<b>Saccade used ${vF.toFixed(0)}% less modelled compute than Full</b> and
     <b>${vB>=0?vB.toFixed(0)+"% less":Math.abs(vB).toFixed(0)+"% more"} than TemporalSim</b>,
     at fidelity ${S.fid.toFixed(4)} vs ${B.fid.toFixed(4)}. Budget violations: <b>${S.viol}</b>.`;
   $("mcnote").innerHTML=$("mc").checked
@@ -243,7 +245,7 @@ function drawWhy(){
   $("why").innerHTML=`Frame ${f} · segment <b>${D.meta.labels[f]}</b> · ego-motion
     <b>${D.ego_motion_median[i].toFixed(3)}</b> patches/frame. Same frames, same threshold
     τ=${tau} — only the reference differs. In a <b>walk</b> or <b>turn</b> segment the left
-    map lights up everywhere while the right stays dark: that gap is the energy saving.`;
+    map lights up everywhere while the right stays dark: that gap is the compute reduction.`;
 }
 
 Promise.all([

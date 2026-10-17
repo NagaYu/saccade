@@ -7,7 +7,7 @@ sdk: static
 app_file: index.html
 pinned: false
 license: mit
-short_description: Energy-gated edge vision via ego-motion prediction
+short_description: Compute-gated edge vision via ego-motion prediction
 tags:
   - edge-ai
   - energy-efficiency
@@ -38,14 +38,15 @@ Don't ask *"did the pixels change?"* — ask **"did anything change that ego-mot
 ## Why this is a static Space
 
 Every configuration in the parameter grid was precomputed offline with the same code the
-repository's 30 tests exercise, then shipped as JSON. So there is no backend, no queue and no
+repository's 32 tests exercise, then shipped as JSON. So there is no backend, no queue and no
 cold start — and the numbers are exactly reproducible from the repo.
 
 ## Honest notes
 
 - The stream is **deterministic synthetic ego-motion**, not natural video — a controlled
   apparatus so the steady-motion claim is exactly reproducible.
-- Energy is an **analytic FLOP model** (`FLOPs × 1 pJ/FLOP`), not a power meter.
+- The J figures are **modelled compute**: an analytic FLOP model (`FLOPs × 1 pJ/FLOP`),
+  not a power meter and not a measurement of energy.
 - Results use the dependency-free `SyntheticBackbone`. On a real ViT (DINOv2-small) the same
   machinery runs but degrades faster at low budgets — see the repo.
 
