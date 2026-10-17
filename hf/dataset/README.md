@@ -91,7 +91,7 @@ The direct evidence. Per frame, the per-patch residual map under **both** rules.
 Residuals are mean absolute pixel differences in [0,1] on a 14×14 patch grid (row-major;
 `reshape(14, 14)` to get a map).
 
-### `measurements` — per-frame energy and quality (432 rows = 144 × 3 conditions)
+### `measurements` — per-frame modelled compute and quality (432 rows = 144 × 3 conditions)
 
 | Column | Type | Description |
 |---|---|---|
@@ -99,18 +99,18 @@ Residuals are mean absolute pixel differences in [0,1] on a 14×14 patch grid (r
 | `condition` | string | `Full`, `TemporalSim` or `Saccade` |
 | `n_encoded`, `encoded_fraction` | int/float | patches actually re-encoded |
 | `fidelity` | float | cosine of the reconstructed patch-token map vs the Full encoder |
-| `frame_flops`, `frame_joules`, `cum_joules` | float | analytic energy model |
+| `frame_flops`, `frame_joules`, `cum_joules` | float | modelled compute (analytic FLOP model × 1 pJ/FLOP), not measured energy |
 | `processed` | bool | `False` = frame dropped entirely (anytime degraded output) |
 | `tau` | float | threshold in force (the budget controller adapts it) |
 | `budget_ok` | bool | whether `cum_J ≤ B·t + E₀` still held |
 
 Headline (steady-state, excluding 6 warm-up frames, budget 20 mW):
 
-| Condition | re-encoded | fidelity | energy | runtime @10 kJ |
-|---|---|---|---|---|
-| Full | 100 % | 1.000 | 1.264 J | 30.3 h |
-| TemporalSim | 33.9 % | 0.9723 | 0.430 J | 89.1 h |
-| **Saccade** | **20.7 %** | **0.9739** | **0.263 J** | **145.8 h** |
+| Condition | re-encoded | fidelity | modelled compute (J, FLOPs × 1 pJ/FLOP) |
+|---|---|---|---|
+| Full | 100 % | 1.000 | 1.264 J |
+| TemporalSim | 33.9 % | 0.9723 | 0.430 J |
+| **Saccade** | **20.7 %** | **0.9739** | **0.263 J** |
 
 ## How the stream was made
 
@@ -132,11 +132,14 @@ panning over a large static textured canvas, scripted into four regimes —
   wearable cameras in the wild.
 - `fidelity` is patch-token cosine similarity against a Full encoder — a proxy for
   downstream task quality, not a task metric like VQA accuracy.
-- Energy is an analytic FLOP model (`FLOPs × 1 pJ/FLOP`), not a power-meter measurement.
-  Relative comparisons and the budget guarantee are sound; absolute Joules are model-dependent.
+- Joules here are modelled compute — an analytic FLOP model (`FLOPs × 1 pJ/FLOP`) — not a
+  power-meter measurement. Relative comparisons and the budget guarantee are sound; absolute
+  Joules are model-dependent. No energy-reduction figure is claimed (see the model card's
+  STATUS).
 - `measurements` uses the `SyntheticBackbone` (a frozen random ViT-S/16-class patch encoder),
-  chosen because each patch embedding is genuinely independent so subset encoding realizes
-  real savings. Numbers on a real ViT differ; see the repo for DINOv2-small results.
+  chosen because each patch embedding is genuinely independent so the compute reduction is
+  realized as real computation. Numbers on a real ViT differ; see the repo for DINOv2-small
+  results.
 
 ## Reproduce
 
